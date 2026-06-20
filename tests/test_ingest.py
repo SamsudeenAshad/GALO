@@ -93,7 +93,7 @@ async def test_fresh_ingest_persists_chunks(store) -> None:
     assert result.chunks > 0
     chunks, embeddings = store.chunks[result.document_id]
     assert len(chunks) == len(embeddings) == result.chunks
-    assert store.jobs[-1] == ("done", None)
+    assert store.jobs[-1] == ("ingest", "done", None)
 
 
 async def test_idempotent_skip_on_identical_content(store) -> None:
@@ -118,4 +118,32 @@ async def test_embed_failure_records_failed_job_and_raises(store) -> None:
     orch = IngestionOrchestrator(store, gw)
     with pytest.raises(ValueError, match="dim mismatch"):
         await orch.ingest_text("some text to embed")
-    assert store.jobs[-1][0] == "failed"
+    assert store.jobs[-1][1] == "failed"
+
+
+async def test_graph_extraction_upserts_and_backlinks(store) -> None:
+    extraction_json = (
+        '{"entities":[{"name":"GALO","type":"CONCEPT"},{"name":"Neo4j","type":"ORG"}],'
+        '"relations":[{"source":"GALO","target":"Neo4j","type":"uses"}]}'
+    )
+    graph = FakeGraph()
+    orch = IngestionOrchestrator(store, FakeGateway(extraction=extraction_json), graph=graph)
+    result = await orch.ingest_text("GALO uses Neo4j for structure.")
+
+    assert result.skipped is False
+    assert len(graph.upserts) >= 1          # at least one chunk's extraction upserted
+    assert store.backlinks                  # entity_ids backlinked onto chunks
+    assert store.jobs[-1] == ("ingest", "done", None)
+
+
+async def test_graph_failure_does_not_fail_ingest(store) -> None:
+    extraction_json = '{"entities":[{"name":"X","type":"OTHER"}],"relations":[]}'
+    graph = FakeGraph(raise_exc=RuntimeError("neo4j down"))
+    orch = IngestionOrchestrator(store, FakeGateway(extraction=extraction_json), graph=graph)
+    result = await orch.ingest_text("some text mentioning X")
+
+    # Ingest still succeeds; a 'graph' failed job is recorded alongside.
+    assert result.skipped is False
+    steps = {(step, status) for step, status, _ in store.jobs}
+    assert ("graph", "failed") in steps
+    assert ("ingest", "done") in steps

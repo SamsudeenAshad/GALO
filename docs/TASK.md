@@ -50,12 +50,25 @@ load → chunk → embed → pgvector. Documents searchable by vector.
 in pgvector; re-posting identical content is a no-op. *(Happy path needs live
 Postgres+Ollama to confirm — logic is unit-tested with stubs.)*
 
-## M2 — Graph *(not started)*
+## M2 — Graph *(done, pending live-infra verification)*
 
 Entity/relation extraction → Neo4j upsert + backlinks.
 
-- [ ] `ingest/extract.py` — LLM structured entity/relation extraction
-- [ ] Neo4j MERGE upserts + `chunk_ids` / `entity_ids` backlinks
+- [x] `ingest/extract.py` — LLM structured extraction; defensive JSON parsing
+      (strips fences, recovers from prose, dedupes, deterministic entity ids)
+- [x] `stores/neo4j.py` — `migrate()` (constraints/indexes) + `upsert_extraction()`
+      (MERGE entities w/ appended `chunk_ids`, MERGE :RELATED w/ weight + provenance)
+- [x] `stores/pg.py` — `set_chunk_entities()` backlink + `chunk_id_for()` helper
+- [x] orchestrator: best-effort graph step (Postgres = source of truth, graph rebuildable);
+      graph failure records a 'graph' failed job but does NOT fail ingest
+- [x] app wiring: Neo4j migrate at startup, graph passed to orchestrator
+- [x] tests: extraction parser (8) + graph orchestrator path (2) — 22 total passing
+- [ ] **Pending live infra:** verify entities/relations land in Neo4j and backlinks
+      in pgvector against a real corpus
+
+**Exit criteria:** ingesting a document populates Neo4j with entities/relations
+linked back to their chunks, and pgvector chunks carry their `entity_ids`.
+*(Needs live Neo4j+Ollama to confirm end-to-end; logic unit-tested with stubs.)*
 
 ## M3 — Hybrid retrieval *(not started)*
 
