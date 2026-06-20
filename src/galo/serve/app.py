@@ -14,8 +14,9 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 
 from galo.config import Settings, get_settings
+from galo.ingest.orchestrator import IngestionOrchestrator
 from galo.models.ollama import OllamaGateway
-from galo.serve.routes import health
+from galo.serve.routes import health, ingest
 from galo.stores.neo4j import Neo4jStore
 from galo.stores.pg import PgStore
 
@@ -41,10 +42,21 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             with contextlib.suppress(Exception):
                 await client.connect()
 
+        # Best-effort schema migration (idempotent). If Postgres is down, boot
+        # proceeds; /ingest will then return a 502 until it recovers.
+        with contextlib.suppress(Exception):
+            await pg.migrate(settings.embed_dim)
+
         app.state.settings = settings
         app.state.gateway = gateway
         app.state.pg = pg
         app.state.neo4j = neo
+        app.state.ingestion = IngestionOrchestrator(
+            pg,
+            gateway,
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+        )
         try:
             yield
         finally:
@@ -54,6 +66,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="GALO", version="0.1.0", lifespan=lifespan)
     app.include_router(health.router)
+    app.include_router(ingest.router)
     return app
 
 
