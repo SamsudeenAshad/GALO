@@ -174,6 +174,43 @@ class PgStore:
         )
         return [(r["id"], r["document_id"], r["text"]) for r in rows]
 
+    async def iter_chunks(
+        self, batch_size: int = 200
+    ):
+        """Async-iterate all chunks as ``(chunk_id, document_id, ord, text)``,
+        ordered, in batches. Used by the reconcile job to rebuild the graph."""
+        offset = 0
+        while True:
+            rows = await self.pool.fetch(
+                """
+                SELECT id, document_id, ord, text
+                FROM chunks
+                ORDER BY document_id, ord
+                LIMIT $1 OFFSET $2
+                """,
+                batch_size,
+                offset,
+            )
+            if not rows:
+                return
+            for r in rows:
+                yield (r["id"], r["document_id"], r["ord"], r["text"])
+            offset += batch_size
+
+    async def count_chunks(self) -> int:
+        return await self.pool.fetchval("SELECT count(*) FROM chunks") or 0
+
+    async def recent_jobs(self, limit: int = 50) -> list[dict]:
+        """Most-recent ingestion job rows, for the ops endpoint."""
+        rows = await self.pool.fetch(
+            """
+            SELECT id, document_id, step, status, error, updated_at
+            FROM jobs ORDER BY updated_at DESC LIMIT $1
+            """,
+            limit,
+        )
+        return [dict(r) for r in rows]
+
     async def record_job(
         self,
         job_id: uuid.UUID,

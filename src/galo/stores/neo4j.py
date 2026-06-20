@@ -154,6 +154,19 @@ class Neo4jStore:
                 out.append((uuid.UUID(rec["id"]), list(rec["names"])))
             return out
 
+    async def clear(self) -> None:
+        """Delete all Entity nodes and their relationships. Used by reconcile
+        before a full rebuild. (Leaves constraints/indexes intact.)"""
+        async with self._driver.session() as session:
+            # batched delete to avoid a huge single transaction
+            while True:
+                result = await session.run(
+                    "MATCH (e:Entity) WITH e LIMIT 10000 DETACH DELETE e RETURN count(e) AS n"
+                )
+                rec = await result.single()
+                if not rec or rec["n"] == 0:
+                    break
+
     async def all_entities(self) -> list[tuple[uuid.UUID, str, str]]:
         """Every entity as ``(id, name, type)`` — used by entity resolution to
         find merge candidates. Fine at v0 scale; paginate when the graph grows."""

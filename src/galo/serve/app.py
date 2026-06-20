@@ -9,6 +9,8 @@ that reports them — so the server still boots when a dependency is down.
 from __future__ import annotations
 
 import contextlib
+import logging
+import time
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
@@ -17,7 +19,8 @@ from galo.config import Settings, get_settings
 from galo.ingest.orchestrator import IngestionOrchestrator
 from galo.models.ollama import OllamaGateway
 from galo.retrieve.orchestrator import RetrievalOrchestrator
-from galo.serve.routes import health, ingest, query, recommend
+from galo.serve.middleware import RequestContextMiddleware
+from galo.serve.routes import health, ingest, ops, query, recommend
 from galo.stores.neo4j import Neo4jStore
 from galo.stores.pg import PgStore
 
