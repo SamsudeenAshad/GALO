@@ -154,6 +154,74 @@ class Neo4jStore:
                 out.append((uuid.UUID(rec["id"]), list(rec["names"])))
             return out
 
+    async def all_entities(self) -> list[tuple[uuid.UUID, str, str]]:
+        """Every entity as ``(id, name, type)`` — used by entity resolution to
+        find merge candidates. Fine at v0 scale; paginate when the graph grows."""
+        async with self._driver.session() as session:
+            result = await session.run(
+                "MATCH (e:Entity) RETURN e.id AS id, e.name AS name, e.type AS type"
+            )
+            return [
+                (uuid.UUID(rec["id"]), rec["name"], rec["type"]) async for rec in result
+            ]
+
+    async def merge_entities(self, keep: uuid.UUID, drop: uuid.UUID) -> None:
+        """Fold entity ``drop`` into ``keep``: move its relationships and union
+        its ``chunk_ids`` onto ``keep``, then delete ``drop``.
+
+        Idempotent-ish: a no-op if either node is already gone. Relationships are
+        rewired by recreating :RELATED edges on ``keep`` (Community Edition has no
+        APOC), preserving type and summing weight.
+        """
+        if keep == drop:
+            return
+        async with self._driver.session() as session:
+            await session.execute_write(self._merge_entities_tx, str(keep), str(drop))
+
+    @staticmethod
+    async def _merge_entities_tx(tx, keep: str, drop: str) -> None:
+        # 1. union chunk_ids (APOC-free list union via reduce)
+        await tx.run(
+            """
+            MATCH (k:Entity {id: $keep}), (d:Entity {id: $drop})
+            SET k.chunk_ids = reduce(
+                acc = coalesce(k.chunk_ids, []),
+                x IN coalesce(d.chunk_ids, []) |
+                CASE WHEN x IN acc THEN acc ELSE acc + x END
+            )
+            """,
+            keep=keep,
+            drop=drop,
+        )
+        # 2. rewire outgoing edges of drop onto keep
+        await tx.run(
+            """
+            MATCH (d:Entity {id: $drop})-[r:RELATED]->(o:Entity)
+            WHERE o.id <> $keep
+            MATCH (k:Entity {id: $keep})
+            MERGE (k)-[nr:RELATED {type: r.type}]->(o)
+              ON CREATE SET nr.weight = coalesce(r.weight, 1), nr.chunk_id = r.chunk_id
+              ON MATCH SET  nr.weight = coalesce(nr.weight, 1) + coalesce(r.weight, 1)
+            """,
+            keep=keep,
+            drop=drop,
+        )
+        # 3. rewire incoming edges of drop onto keep
+        await tx.run(
+            """
+            MATCH (o:Entity)-[r:RELATED]->(d:Entity {id: $drop})
+            WHERE o.id <> $keep
+            MATCH (k:Entity {id: $keep})
+            MERGE (o)-[nr:RELATED {type: r.type}]->(k)
+              ON CREATE SET nr.weight = coalesce(r.weight, 1), nr.chunk_id = r.chunk_id
+              ON MATCH SET  nr.weight = coalesce(nr.weight, 1) + coalesce(r.weight, 1)
+            """,
+            keep=keep,
+            drop=drop,
+        )
+        # 4. delete the dropped node and its now-redundant edges
+        await tx.run("MATCH (d:Entity {id: $drop}) DETACH DELETE d", drop=drop)
+
     async def set_prerequisite(self, before: uuid.UUID, after: uuid.UUID) -> None:
         """Author a curriculum edge: ``before`` is a prerequisite of ``after``.
 
