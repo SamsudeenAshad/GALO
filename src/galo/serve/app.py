@@ -19,7 +19,7 @@ from galo.config import Settings, get_settings
 from galo.ingest.orchestrator import IngestionOrchestrator
 from galo.models.ollama import OllamaGateway
 from galo.retrieve.orchestrator import RetrievalOrchestrator
-from galo.serve.middleware import RequestContextMiddleware
+from galo.serve.middleware import JsonAccessFormatter, RequestContextMiddleware
 from galo.serve.routes import health, ingest, ops, query, recommend
 from galo.stores.neo4j import Neo4jStore
 from galo.stores.pg import PgStore
@@ -83,6 +83,13 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         level=settings.log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # Access logger emits structured JSON lines (request_id, status, latency).
+    access_logger = logging.getLogger("galo.access")
+    access_logger.propagate = False
+    if not access_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(JsonAccessFormatter())
+        access_logger.addHandler(handler)
 
     app = FastAPI(title="GALO", version="0.1.0", lifespan=lifespan)
     app.add_middleware(RequestContextMiddleware, clock=time.monotonic)

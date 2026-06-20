@@ -110,9 +110,27 @@ graph+vector context, with chunk/document citations and graph paths.
 **Exit criteria:** `/recommend` returns blended graph+semantic suggestions for a
 seed entity; `/path` returns an ordered prerequisite chain between two concepts.
 
-## M5 — Hardening *(not started)*
+## M5 — Hardening *(done, pending live-infra verification)*
 
-- [ ] Entity resolution v1, reconcile job, observability, load tests
+- [x] `maintain/resolve.py` — entity resolution v1: embedding-similarity blocking
+      (same-type), optional LLM adjudication, union-find clustering, merge into
+      canonical (longest name)
+- [x] `stores/neo4j.py` — `all_entities`, `merge_entities` (APOC-free edge rewire +
+      chunk_ids union + delete), `clear` (batched)
+- [x] `maintain/reconcile.py` — rebuild graph from Postgres (source of truth);
+      per-chunk failures counted, not fatal
+- [x] `stores/pg.py` — `iter_chunks`, `count_chunks`, `recent_jobs`
+- [x] observability: `serve/middleware.py` (request-id + structured JSON access log
+      with latency), `serve/routes/ops.py` (`GET /jobs`, `GET /stats`)
+- [x] app wiring: middleware + JSON access logger + ops router
+- [x] tests: resolve (4) + reconcile (2) — 41 total passing
+- [x] smoke: 7 endpoints; X-Request-ID generated/honored; JSON access logs render;
+      /stats partial-ok 200 with deps down; /jobs 502 with PG down
+- [ ] **Pending:** load tests; live-infra verification of resolve/reconcile
+
+**Note:** entity resolution + reconcile are out-of-band maintenance jobs (modules,
+not yet exposed as endpoints or a CLI — invoke programmatically). Wiring them to
+an admin endpoint or CLI command is a small follow-up if desired.
 
 ---
 

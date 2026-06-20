@@ -9,6 +9,7 @@ keep this module free of forbidden time calls.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -18,6 +19,24 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 logger = logging.getLogger("galo.access")
+
+# Fields the access logger attaches via `extra=`; rendered by JsonAccessFormatter.
+_EXTRA_FIELDS = ("request_id", "method", "path", "status", "elapsed_ms")
+
+
+class JsonAccessFormatter(logging.Formatter):
+    """Renders access records as one JSON line so structured fields are visible.
+
+    Install on the ``galo.access`` logger to get machine-parseable access logs;
+    other loggers keep the default text format.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {"msg": record.getMessage(), "level": record.levelname}
+        for field in _EXTRA_FIELDS:
+            if hasattr(record, field):
+                payload[field] = getattr(record, field)
+        return json.dumps(payload)
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
