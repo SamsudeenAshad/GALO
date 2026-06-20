@@ -125,6 +125,55 @@ class PgStore:
         in ``replace_chunks`` so callers can address chunks without a round-trip."""
         return uuid.uuid5(document_id, str(ord))
 
+    # --- retrieval queries ----------------------------------------------
+
+    async def search_vectors(
+        self, query_embedding: Vector, k: int
+    ) -> list[tuple[uuid.UUID, uuid.UUID, str, float]]:
+        """ANN search: nearest ``k`` chunks by cosine distance.
+
+        Returns ``(chunk_id, document_id, text, distance)`` ordered nearest-first.
+        Lower distance = more similar.
+        """
+        rows = await self.pool.fetch(
+            """
+            SELECT id, document_id, text, embedding <=> $1::vector AS distance
+            FROM chunks
+            WHERE embedding IS NOT NULL
+            ORDER BY distance
+            LIMIT $2
+            """,
+            _vector_literal(query_embedding),
+            k,
+        )
+        return [(r["id"], r["document_id"], r["text"], r["distance"]) for r in rows]
+
+    async def chunks_for_entities(
+        self, entity_ids: list[uuid.UUID], limit: int
+    ) -> list[tuple[uuid.UUID, uuid.UUID, str]]:
+        """Fetch chunks that mention any of ``entity_ids`` (the graph→chunk map).
+
+        Returns ``(chunk_id, document_id, text)``. Order is by overlap count
+        (chunks touching more of the seed entities first).
+        """
+        if not entity_ids:
+            return []
+        rows = await self.pool.fetch(
+            """
+            SELECT id, document_id, text,
+                   cardinality(ARRAY(
+                       SELECT unnest(entity_ids) INTERSECT SELECT unnest($1::uuid[])
+                   )) AS overlap
+            FROM chunks
+            WHERE entity_ids && $1::uuid[]
+            ORDER BY overlap DESC
+            LIMIT $2
+            """,
+            entity_ids,
+            limit,
+        )
+        return [(r["id"], r["document_id"], r["text"]) for r in rows]
+
     async def record_job(
         self,
         job_id: uuid.UUID,

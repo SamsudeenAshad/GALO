@@ -121,6 +121,39 @@ class Neo4jStore:
                 chunk_id=chunk_id,
             )
 
+    # --- retrieval traversal --------------------------------------------
+
+    async def expand(
+        self, seed_ids: list[uuid.UUID], hops: int, limit: int
+    ) -> list[tuple[uuid.UUID, list[str]]]:
+        """From seed entities, walk up to ``hops`` :RELATED hops and return the
+        reachable entities (excluding seeds) as ``(entity_id, path_names)``.
+
+        ``path_names`` is the entity-name sequence from a seed to the neighbor,
+        kept for provenance. Distance-ordered (closer neighbors first).
+        """
+        if not seed_ids or hops < 1:
+            return []
+        seeds = [str(s) for s in seed_ids]
+        # Variable-length undirected expansion. Cap hops via the pattern length;
+        # `hops` is interpolated (validated int) since Cypher can't parameterize
+        # a path length bound.
+        cypher = (
+            "MATCH (s:Entity) WHERE s.id IN $seeds "
+            f"MATCH path = (s)-[:RELATED*1..{int(hops)}]-(n:Entity) "
+            "WHERE NOT n.id IN $seeds "
+            "WITH n, min(length(path)) AS dist, "
+            "     head(collect([x IN nodes(path) | x.name])) AS names "
+            "RETURN n.id AS id, dist, names "
+            "ORDER BY dist ASC LIMIT $limit"
+        )
+        async with self._driver.session() as session:
+            result = await session.run(cypher, seeds=seeds, limit=limit)
+            out: list[tuple[uuid.UUID, list[str]]] = []
+            async for rec in result:
+                out.append((uuid.UUID(rec["id"]), list(rec["names"])))
+            return out
+
     async def aclose(self) -> None:
         if self._driver is not None:
             await self._driver.close()
