@@ -6,6 +6,8 @@ and a probe that raises — without needing real Neo4j/Postgres/Ollama.
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -32,16 +34,19 @@ class _StubClient:
         pass
 
 
-def _client(ollama, pg, neo) -> TestClient:
-    app = build_app(Settings())
+@contextlib.contextmanager
+def _client(ollama, pg, neo):
+    """Yield a started TestClient whose dependency clients are stubs.
 
-    # Replace lifespan-built clients with stubs once the app has started.
-    client = TestClient(app)
-    client.__enter__()
-    app.state.gateway = ollama
-    app.state.pg = pg
-    app.state.neo4j = neo
-    return client
+    The stubs are installed *inside* the lifespan window (after ``__enter__``
+    runs the real lifespan) so the running app actually uses them.
+    """
+    app = build_app(Settings())
+    with TestClient(app) as c:
+        app.state.gateway = ollama
+        app.state.pg = pg
+        app.state.neo4j = neo
+        yield c
 
 
 def test_health_all_ok() -> None:
