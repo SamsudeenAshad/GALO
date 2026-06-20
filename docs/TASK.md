@@ -70,12 +70,28 @@ Entity/relation extraction → Neo4j upsert + backlinks.
 linked back to their chunks, and pgvector chunks carry their `entity_ids`.
 *(Needs live Neo4j+Ollama to confirm end-to-end; logic unit-tested with stubs.)*
 
-## M3 — Hybrid retrieval *(not started)*
+## M3 — Hybrid retrieval *(done, pending live-infra verification)*
 
 vector ∪ graph → RRF → `/query` with citations.
 
-- [ ] `retrieve/vector.py`, `retrieve/graph.py`, `retrieve/fuse.py`
-- [ ] `retrieve/orchestrator.py`, `POST /query`
+- [x] `stores/pg.py` — `search_vectors()` (cosine ANN) + `chunks_for_entities()` (graph→chunk map)
+- [x] `stores/neo4j.py` — `expand()` N-hop :RELATED traversal w/ provenance paths
+- [x] `retrieve/vector.py` — embed query → ANN candidates
+- [x] `retrieve/graph.py` — seed from vector hits' entities → expand → chunks
+- [x] `retrieve/fuse.py` — Reciprocal Rank Fusion (rank-only, scale-agnostic)
+- [x] `retrieve/orchestrator.py` — retrieve→fuse→assemble(token-budgeted)→generate→cite
+- [x] `serve/routes/query.py` + schemas — `POST /query`
+- [x] app wiring: RetrievalOrchestrator on app.state
+- [x] tests: fuse (4) + retrieve orchestrator (3) — 29 total passing
+- [x] smoke: `/query` registered; 502 when deps down, 422 on empty; graph seeded from vector hits
+- [ ] **Pending live infra:** verify answer quality + citation accuracy on a real corpus
+
+**Exit criteria:** `POST /query` returns an LLM answer grounded in fused
+graph+vector context, with chunk/document citations and graph paths.
+*(Answer quality needs live Neo4j+pgvector+Ollama; orchestration unit-tested.)*
+
+**v0 seeding note:** graph path is seeded from the top vector hits' `entity_ids`
+(no separate query-NER). Query-side entity extraction is a future enhancement.
 
 ## M4 — Platform endpoints *(not started)*
 

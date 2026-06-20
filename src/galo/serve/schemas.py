@@ -35,3 +35,40 @@ class CitationModel(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     citations: list[CitationModel]
+
+
+class RecommendRequest(BaseModel):
+    entity: str = Field(..., min_length=1, description="Seed entity name.")
+    k: int = Field(10, ge=1, le=100)
+    alpha: float = Field(
+        0.5, ge=0.0, le=1.0, description="Blend: 1=semantic only, 0=graph only."
+    )
+
+
+class RecommendationModel(BaseModel):
+    entity_id: uuid.UUID
+    name: str
+    graph_weight: float
+    similarity: float
+    score: float
+
+
+class RecommendResponse(BaseModel):
+    seed_found: bool
+    recommendations: list[RecommendationModel]
+
+
+class PathRequest(BaseModel):
+    from_concept: str = Field(..., min_length=1)
+    to_concept: str = Field(..., min_length=1)
+
+
+class PathStepModel(BaseModel):
+    entity_id: uuid.UUID
+    name: str
+
+
+class PathResponse(BaseModel):
+    found: bool
+    steps: list[PathStepModel]
+    reason: str | None = None

@@ -154,6 +154,62 @@ class Neo4jStore:
                 out.append((uuid.UUID(rec["id"]), list(rec["names"])))
             return out
 
+    async def find_entity(self, name: str) -> uuid.UUID | None:
+        """Resolve an entity id by (normalized) name. Exact match, v0."""
+        norm = " ".join(name.lower().split())
+        async with self._driver.session() as session:
+            result = await session.run(
+                "MATCH (e:Entity {normalized_name: $norm}) RETURN e.id AS id LIMIT 1",
+                norm=norm,
+            )
+            rec = await result.single()
+            return uuid.UUID(rec["id"]) if rec else None
+
+    async def neighbors(
+        self, entity_id: uuid.UUID, *, limit: int
+    ) -> list[tuple[uuid.UUID, str, float]]:
+        """Direct :RELATED neighbors of an entity, by descending edge weight.
+
+        Returns ``(neighbor_id, neighbor_name, weight)``.
+        """
+        async with self._driver.session() as session:
+            result = await session.run(
+                """
+                MATCH (e:Entity {id: $id})-[r:RELATED]-(n:Entity)
+                RETURN n.id AS id, n.name AS name,
+                       coalesce(r.weight, 1) AS weight
+                ORDER BY weight DESC
+                LIMIT $limit
+                """,
+                id=str(entity_id),
+                limit=limit,
+            )
+            return [
+                (uuid.UUID(rec["id"]), rec["name"], float(rec["weight"]))
+                async for rec in result
+            ]
+
+    async def prerequisite_path(
+        self, source_id: uuid.UUID, target_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str]] | None:
+        """Shortest directed :PREREQUISITE path source→target, as an ordered
+        list of ``(entity_id, name)``. None if no path exists.
+        """
+        async with self._driver.session() as session:
+            result = await session.run(
+                """
+                MATCH (s:Entity {id: $s}), (t:Entity {id: $t}),
+                      p = shortestPath((s)-[:PREREQUISITE*..15]->(t))
+                RETURN [x IN nodes(p) | [x.id, x.name]] AS steps
+                """,
+                s=str(source_id),
+                t=str(target_id),
+            )
+            rec = await result.single()
+            if not rec:
+                return None
+            return [(uuid.UUID(sid), name) for sid, name in rec["steps"]]
+
     async def aclose(self) -> None:
         if self._driver is not None:
             await self._driver.close()
