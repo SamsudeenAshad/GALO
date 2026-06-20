@@ -42,10 +42,12 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             with contextlib.suppress(Exception):
                 await client.connect()
 
-        # Best-effort schema migration (idempotent). If Postgres is down, boot
+        # Best-effort schema migration (idempotent). If a store is down, boot
         # proceeds; /ingest will then return a 502 until it recovers.
         with contextlib.suppress(Exception):
             await pg.migrate(settings.embed_dim)
+        with contextlib.suppress(Exception):
+            await neo.migrate()
 
         app.state.settings = settings
         app.state.gateway = gateway
@@ -54,6 +56,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         app.state.ingestion = IngestionOrchestrator(
             pg,
             gateway,
+            graph=neo,
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
         )

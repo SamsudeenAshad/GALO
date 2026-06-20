@@ -14,9 +14,12 @@ from galo.models.gateway import HealthStatus
 
 
 class FakeGateway:
-    def __init__(self, dim: int = 3, raise_exc: Exception | None = None) -> None:
+    def __init__(
+        self, dim: int = 3, raise_exc: Exception | None = None, extraction: str = ""
+    ) -> None:
         self._dim = dim
         self._raise = raise_exc
+        self._extraction = extraction
 
     async def embed(self, texts):
         if self._raise is not None:
@@ -24,7 +27,7 @@ class FakeGateway:
         return [[0.1] * self._dim for _ in texts]
 
     async def generate(self, prompt, *, system=None):
-        return ""
+        return self._extraction
 
     async def health(self):
         return HealthStatus(ok=True, detail="fake")
@@ -33,13 +36,25 @@ class FakeGateway:
         pass
 
 
+class FakeGraph:
+    def __init__(self, raise_exc: Exception | None = None) -> None:
+        self._raise = raise_exc
+        self.upserts: list = []
+
+    async def upsert_extraction(self, chunk_id, extraction):
+        if self._raise is not None:
+            raise self._raise
+        self.upserts.append((chunk_id, extraction))
+
+
 class FakeStore:
     """In-memory stand-in for PgStore's ingestion surface."""
 
     def __init__(self) -> None:
         self.docs: dict[str, object] = {}      # content_hash -> doc
         self.chunks: dict = {}                 # document_id -> (chunks, embeddings)
-        self.jobs: list[tuple] = []
+        self.backlinks: dict = {}              # chunk_id -> entity_ids
+        self.jobs: list[tuple] = []            # (step, status, error)
 
     async def content_exists(self, content_hash):
         return content_hash in self.docs
@@ -53,7 +68,15 @@ class FakeStore:
         self.chunks[document_id] = (chunks, embeddings)
 
     async def record_job(self, job_id, document_id, step, status, error=None):
-        self.jobs.append((status, error))
+        self.jobs.append((step, status, error))
+
+    def chunk_id_for(self, document_id, ord):
+        import uuid
+
+        return uuid.uuid5(document_id, str(ord))
+
+    async def set_chunk_entities(self, chunk_id, entity_ids):
+        self.backlinks[chunk_id] = entity_ids
 
 
 @pytest.fixture

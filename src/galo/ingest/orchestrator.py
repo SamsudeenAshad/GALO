@@ -10,9 +10,11 @@ from __future__ import annotations
 import uuid
 
 from galo.ingest.chunker import chunk_text
+from galo.ingest.extract import extract_chunk
 from galo.ingest.loader import load_bytes, load_text
 from galo.ingest.types import IngestResult
 from galo.models.gateway import ModelGateway
+from galo.stores.neo4j import Neo4jStore
 from galo.stores.pg import PgStore
 
 
@@ -22,11 +24,13 @@ class IngestionOrchestrator:
         store: PgStore,
         gateway: ModelGateway,
         *,
+        graph: Neo4jStore | None = None,
         chunk_size: int = 800,
         chunk_overlap: int = 120,
     ) -> None:
         self._store = store
         self._gateway = gateway
+        self._graph = graph
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
 
@@ -71,8 +75,31 @@ class IngestionOrchestrator:
             )
             await self._store.replace_chunks(doc.id, chunks, embeddings)
 
+            # Graph extraction is best-effort: Postgres is the source of truth and
+            # the graph is rebuildable, so a graph failure must not fail ingest.
+            if self._graph is not None and chunks:
+                await self._extract_graph(doc.id, chunks, job_id)
+
             await self._store.record_job(job_id, doc.id, "ingest", "done")
             return IngestResult(doc.id, doc.content_hash, chunks=len(chunks), skipped=False)
         except Exception as exc:  # noqa: BLE001 — record then re-raise for the caller
             await self._store.record_job(job_id, doc.id, "ingest", "failed", str(exc))
             raise
+
+    async def _extract_graph(self, document_id, chunks, job_id) -> None:
+        """Extract entities/relations per chunk → Neo4j, and write the
+        chunk→entity backlink in Postgres. Best-effort: a failure is recorded
+        on the job but does not abort ingestion."""
+        try:
+            for chunk in chunks:
+                chunk_id = self._store.chunk_id_for(document_id, chunk.ord)
+                extraction = await extract_chunk(self._gateway, chunk.text)
+                if not extraction.entities:
+                    continue
+                await self._graph.upsert_extraction(chunk_id, extraction)
+                entity_ids = [e.id for e in extraction.entities]
+                await self._store.set_chunk_entities(chunk_id, entity_ids)
+        except Exception as exc:  # noqa: BLE001
+            await self._store.record_job(
+                job_id, document_id, "graph", "failed", str(exc)
+            )

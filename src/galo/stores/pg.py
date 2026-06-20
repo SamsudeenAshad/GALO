@@ -110,6 +110,21 @@ class PgStore:
                 ],
             )
 
+    async def set_chunk_entities(
+        self, chunk_id: uuid.UUID, entity_ids: list[uuid.UUID]
+    ) -> None:
+        """Backlink: write the entity ids extracted from a chunk onto its row."""
+        await self.pool.execute(
+            "UPDATE chunks SET entity_ids = $2 WHERE id = $1",
+            chunk_id,
+            entity_ids,
+        )
+
+    def chunk_id_for(self, document_id: uuid.UUID, ord: int) -> uuid.UUID:
+        """The deterministic chunk id for (document, ord) — mirrors the id used
+        in ``replace_chunks`` so callers can address chunks without a round-trip."""
+        return uuid.uuid5(document_id, str(ord))
+
     async def record_job(
         self,
         job_id: uuid.UUID,
