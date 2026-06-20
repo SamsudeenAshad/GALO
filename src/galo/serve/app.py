@@ -61,6 +61,14 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
         )
+        app.state.retrieval = RetrievalOrchestrator(
+            pg,
+            neo,
+            gateway,
+            k=settings.retrieve_k,
+            hops=settings.graph_hops,
+            rrf_k=settings.rrf_k,
+        )
         try:
             yield
         finally:
@@ -71,6 +79,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="GALO", version="0.1.0", lifespan=lifespan)
     app.include_router(health.router)
     app.include_router(ingest.router)
+    app.include_router(query.router)
     return app
 
 
