@@ -154,6 +154,22 @@ class Neo4jStore:
                 out.append((uuid.UUID(rec["id"]), list(rec["names"])))
             return out
 
+    async def set_prerequisite(self, before: uuid.UUID, after: uuid.UUID) -> None:
+        """Author a curriculum edge: ``before`` is a prerequisite of ``after``.
+
+        v0 the curriculum layer is hand-authored via this method (see
+        ARCHITECTURE.md §10 open question). Both entities must already exist.
+        """
+        async with self._driver.session() as session:
+            await session.run(
+                """
+                MATCH (b:Entity {id: $before}), (a:Entity {id: $after})
+                MERGE (b)-[:PREREQUISITE]->(a)
+                """,
+                before=str(before),
+                after=str(after),
+            )
+
     async def find_entity(self, name: str) -> uuid.UUID | None:
         """Resolve an entity id by (normalized) name. Exact match, v0."""
         norm = " ".join(name.lower().split())

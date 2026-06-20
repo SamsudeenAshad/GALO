@@ -17,7 +17,7 @@ from galo.config import Settings, get_settings
 from galo.ingest.orchestrator import IngestionOrchestrator
 from galo.models.ollama import OllamaGateway
 from galo.retrieve.orchestrator import RetrievalOrchestrator
-from galo.serve.routes import health, ingest, query
+from galo.serve.routes import health, ingest, query, recommend
 from galo.stores.neo4j import Neo4jStore
 from galo.stores.pg import PgStore
 
@@ -80,6 +80,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(ingest.router)
     app.include_router(query.router)
+    app.include_router(recommend.router)
     return app
 
 

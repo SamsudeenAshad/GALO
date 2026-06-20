@@ -93,9 +93,22 @@ graph+vector context, with chunk/document citations and graph paths.
 **v0 seeding note:** graph path is seeded from the top vector hits' `entity_ids`
 (no separate query-NER). Query-side entity extraction is a future enhancement.
 
-## M4 — Platform endpoints *(not started)*
+## M4 — Platform endpoints *(done, pending live-infra verification)*
 
-- [ ] `POST /recommend`, `POST /path` (curriculum layer)
+- [x] `stores/neo4j.py` — `find_entity`, `neighbors` (weighted), `prerequisite_path`
+      (shortestPath over :PREREQUISITE), `set_prerequisite` (hand-authored curriculum)
+- [x] `retrieve/recommend.py` — graph neighbors re-ranked by semantic similarity;
+      `alpha` blends signals (1=semantic, 0=graph)
+- [x] `retrieve/path.py` — resolve two concepts → shortest prerequisite chain
+- [x] `serve/routes/recommend.py` + schemas — `POST /recommend`, `POST /path`
+- [x] app wiring: router mounted (reuses neo4j + gateway already on app.state)
+- [x] tests: recommend blend + path resolution (6) — 35 total passing
+- [x] smoke: both registered; 502 deps-down; 422 on invalid alpha
+- [ ] **Pending live infra:** verify recommendations + paths on a real graph;
+      decide curriculum-authoring story (hand-authored via set_prerequisite vs inferred)
+
+**Exit criteria:** `/recommend` returns blended graph+semantic suggestions for a
+seed entity; `/path` returns an ordered prerequisite chain between two concepts.
 
 ## M5 — Hardening *(not started)*
 
