@@ -30,7 +30,7 @@ class PgStore:
     async def health(self) -> HealthStatus:
         try:
             if self._pool is None:
-                return HealthStatus(ok=False, detail="pool not initialized")
+                return HealthStatus(ok=False, detail="unreachable: pool not initialized (connect failed at startup)")
             async with self._pool.acquire() as conn:
                 await conn.execute("SELECT 1")
                 has_vector = await conn.fetchval(

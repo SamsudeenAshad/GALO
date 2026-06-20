@@ -5,7 +5,7 @@ Tracks implementation progress against the milestones in
 
 ---
 
-## M0 — Skeleton  *(in progress)*
+## M0 — Skeleton  *(done)*
 
 Goal: config, store clients, Model Gateway, and `/health`. Connectivity proven.
 
@@ -14,16 +14,17 @@ Goal: config, store clients, Model Gateway, and `/health`. Connectivity proven.
 - [x] `docs/ARCHITECTURE.md` — design doc
 - [x] `docs/TASK.md` — this tracker
 - [x] `src/galo/__init__.py`
-- [ ] `.env.example` — documented config surface
-- [ ] `src/galo/config.py` — pydantic-settings, env-driven
-- [ ] `src/galo/models/gateway.py` — `ModelGateway` protocol + types
-- [ ] `src/galo/models/ollama.py` — `OllamaGateway` (embed/generate, health)
-- [ ] `src/galo/stores/pg.py` — async Postgres/pgvector client + ping
-- [ ] `src/galo/stores/neo4j.py` — async Neo4j client + ping
-- [ ] `src/galo/serve/app.py` — FastAPI app, lifespan wiring, `main()`
-- [ ] `src/galo/serve/routes/health.py` — `/health` dependency probes
-- [ ] `tests/test_health.py` — health endpoint with deps mocked
-- [ ] Manual smoke: `galo` serves, `/health` reports per-dependency status
+- [x] `.env.example` — documented config surface
+- [x] `src/galo/config.py` — pydantic-settings, env-driven
+- [x] `src/galo/models/gateway.py` — `ModelGateway` protocol + types
+- [x] `src/galo/models/ollama.py` — `OllamaGateway` (embed/generate, health)
+- [x] `src/galo/stores/pg.py` — async Postgres/pgvector client + ping
+- [x] `src/galo/stores/neo4j.py` — async Neo4j client + ping
+- [x] `src/galo/serve/app.py` — FastAPI app, lifespan wiring, `main()`
+- [x] `src/galo/serve/routes/health.py` — `/health` dependency probes
+- [x] `tests/test_health.py` — health endpoint with deps mocked (3 passing)
+- [x] Manual smoke: `galo` serves; `/health` returns 200 + `degraded` with
+      accurate per-dependency detail when all deps are down
 
 **Exit criteria:** `galo` starts; `GET /health` returns liveness + per-dependency
 (Neo4j, Postgres, Ollama) status without crashing when a dependency is down.
