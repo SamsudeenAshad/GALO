@@ -79,11 +79,18 @@ def build_app(settings: Settings | None = None) -> FastAPI:
                 with contextlib.suppress(Exception):
                     await closer()
 
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
     app = FastAPI(title="GALO", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(RequestContextMiddleware, clock=time.monotonic)
     app.include_router(health.router)
     app.include_router(ingest.router)
     app.include_router(query.router)
     app.include_router(recommend.router)
+    app.include_router(ops.router)
     return app
 
 
