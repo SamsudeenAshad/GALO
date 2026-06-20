@@ -16,7 +16,8 @@ from fastapi import FastAPI
 from galo.config import Settings, get_settings
 from galo.ingest.orchestrator import IngestionOrchestrator
 from galo.models.ollama import OllamaGateway
-from galo.serve.routes import health, ingest
+from galo.retrieve.orchestrator import RetrievalOrchestrator
+from galo.serve.routes import health, ingest, query
 from galo.stores.neo4j import Neo4jStore
 from galo.stores.pg import PgStore
 
