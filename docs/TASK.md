@@ -31,14 +31,24 @@ Goal: config, store clients, Model Gateway, and `/health`. Connectivity proven.
 
 ---
 
-## M1 — Ingestion *(not started)*
+## M1 — Ingestion *(done, pending live-infra verification)*
 
 load → chunk → embed → pgvector. Documents searchable by vector.
 
-- [ ] `stores/schema.sql` + migrations (documents, chunks, jobs)
-- [ ] `ingest/loader.py`, `ingest/chunker.py`
-- [ ] `ingest/orchestrator.py` — load→chunk→embed, idempotent per content hash
-- [ ] `POST /ingest`
+- [x] `stores/schema.sql` — documents, chunks (vector{EMBED_DIM}), jobs; HNSW + GIN indexes
+- [x] `stores/pg.py` — migrate(), upsert_document, replace_chunks, record_job, content_exists
+- [x] `ingest/loader.py` — text/bytes load, normalized, content-hash + deterministic id
+- [x] `ingest/chunker.py` — overlapping windows, boundary-aware, forward-progress guaranteed
+- [x] `ingest/orchestrator.py` — load→chunk→embed→persist, idempotent per content hash, `force`
+- [x] `serve/schemas.py`, `serve/routes/ingest.py` — `POST /ingest`
+- [x] app wiring: best-effort migrate at startup, orchestrator on app.state
+- [x] tests: chunker (5) + ingestion orchestrator (4) — all passing (12 total)
+- [x] smoke: `/ingest` returns 502 when PG down, 422 on empty text, registered in OpenAPI
+- [ ] **Pending live infra:** verify successful persist path against real Postgres+pgvector+Ollama
+
+**Exit criteria:** a document POSTed to `/ingest` is chunked, embedded, and stored
+in pgvector; re-posting identical content is a no-op. *(Happy path needs live
+Postgres+Ollama to confirm — logic is unit-tested with stubs.)*
 
 ## M2 — Graph *(not started)*
 
