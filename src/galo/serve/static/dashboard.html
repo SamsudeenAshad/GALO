@@ -9,10 +9,16 @@
     --bg: #e0e5ec; --shadow-d: #a3b1c6; --shadow-l: #ffffff;
     --text: #46505f; --muted: #8795a8; --accent: #6d8dc7;
     --ok: #57cc99; --bad: #e07a5f; --amber: #e9c46a; --r: 16px;
+    /* sidebar: dark blue-slate in light mode (light text on it) */
+    --side-bg: #3c4a63; --side-shadow-d: #2e3950; --side-shadow-l: #4a5a78;
+    --side-text: #d3dcef; --side-muted: #9fb0d0;
   }
   [data-theme="dark"] {
     --bg: #2b2f36; --shadow-d: #212429; --shadow-l: #353a42;
     --text: #c7cdd6; --muted: #828d9e; --accent: #8aa6da;
+    /* sidebar: soft blue tint in dark mode (dark text on it) */
+    --side-bg: #cfdcf0; --side-shadow-d: #a6b8d4; --side-shadow-l: #f2f7ff;
+    --side-text: #3a4660; --side-muted: #6c7c9c;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -27,11 +33,18 @@
   /* ===== app shell: sidebar + main stage ===== */
   .app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; gap: 0; }
 
-  /* ---- sidebar ---- */
+  /* ---- sidebar (blue, theme-aware) ----
+     Re-map the neumorphic vars inside the sidebar so every nested card, input,
+     and button extrudes from the blue surface with matching shadows. */
   aside {
+    --bg: var(--side-bg);
+    --shadow-d: var(--side-shadow-d);
+    --shadow-l: var(--side-shadow-l);
+    --text: var(--side-text);
+    --muted: var(--side-muted);
     padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
-    background: var(--bg);
-    box-shadow: inset -7px 0 14px -10px var(--shadow-d);
+    background: var(--side-bg);
+    box-shadow: inset -8px 0 16px -12px var(--side-shadow-d);
   }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand .logo { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: var(--accent); }
@@ -134,19 +147,23 @@
   .answer { font-size: 16px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
   .answer.empty { color: var(--muted); font-style: italic; font-size: 14px; }
   .answer.err { color: var(--bad); }
-  .cites { display: flex; flex-direction: column; gap: 8px; }
-  .cites .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
-  .cite { padding: 10px 14px; border-radius: 11px; font-size: 12.5px; line-height: 1.5; }
+  .cites { display: flex; flex-direction: column; gap: 8px;
+           max-height: 220px; overflow-y: auto; padding-right: 4px; }
+  .cites .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted);
+                position: sticky; top: 0; background: var(--bg); padding: 2px 0; }
+  .cite { padding: 10px 14px; border-radius: 11px; font-size: 12.5px; line-height: 1.5;
+          word-break: break-word; }
   .cite b { color: var(--accent); }
   .gp { color: var(--accent); font-weight: 600; }
 
-  /* graph as supporting evidence */
-  .graph-head { display: flex; align-items: center; gap: 12px; }
+  /* graph as supporting evidence — its own block, clearly separated */
+  .graph-section { display: flex; flex-direction: column; gap: 10px; }
+  .graph-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .graph-head .ttl { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); }
   .graph-head .meta { font-size: 11px; color: var(--muted); }
   .graph-head .reload { margin-left: auto; padding: 7px 14px; font-size: 12px; }
   .graphWell { padding: 10px; border-radius: 18px; }
-  canvas { width: 100%; height: 380px; border-radius: 12px; display: block; cursor: grab; }
+  canvas { width: 100%; height: 480px; border-radius: 12px; display: block; cursor: grab; }
   .legend { display: flex; gap: 15px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted); margin-top: 8px; }
   .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 
@@ -255,13 +272,13 @@
       <div class="cites" id="q-cites"></div>
     </div>
 
-    <div>
+    <div class="graph-section">
       <div class="graph-head">
         <span class="ttl">Knowledge graph</span>
         <span class="meta" id="graph-meta"></span>
         <button class="reload" id="graph-btn" onclick="loadGraph()">↻ Reload</button>
       </div>
-      <div class="graphWell inset" style="margin-top:10px"><canvas id="graph"></canvas></div>
+      <div class="graphWell inset"><canvas id="graph"></canvas></div>
       <div class="legend" id="legend"></div>
     </div>
   </main>
