@@ -88,10 +88,13 @@ class IngestionOrchestrator:
 
     async def _extract_graph(self, document_id, chunks, job_id) -> None:
         """Extract entities/relations per chunk → Neo4j, and write the
-        chunk→entity backlink in Postgres. Best-effort: a failure is recorded
-        on the job but does not abort ingestion."""
-        try:
-            for chunk in chunks:
+        chunk→entity backlink in Postgres. Best-effort and **per-chunk isolated**:
+        a single chunk failing (model hiccup, timeout, bad JSON) must not abort
+        the rest of the document — it is counted and skipped."""
+        failures = 0
+        last_error = None
+        for chunk in chunks:
+            try:
                 chunk_id = self._store.chunk_id_for(document_id, chunk.ord)
                 extraction = await extract_chunk(self._gateway, chunk.text)
                 if not extraction.entities:
@@ -99,7 +102,11 @@ class IngestionOrchestrator:
                 await self._graph.upsert_extraction(chunk_id, extraction)
                 entity_ids = [e.id for e in extraction.entities]
                 await self._store.set_chunk_entities(chunk_id, entity_ids)
-        except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 — skip this chunk, keep going
+                failures += 1
+                last_error = str(exc)
+        if failures:
             await self._store.record_job(
-                job_id, document_id, "graph", "failed", str(exc)
+                job_id, document_id, "graph", "partial",
+                f"{failures}/{len(chunks)} chunks failed extraction; last: {last_error}",
             )

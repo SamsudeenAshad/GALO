@@ -142,8 +142,36 @@ async def test_graph_failure_does_not_fail_ingest(store) -> None:
     orch = IngestionOrchestrator(store, FakeGateway(extraction=extraction_json), graph=graph)
     result = await orch.ingest_text("some text mentioning X")
 
-    # Ingest still succeeds; a 'graph' failed job is recorded alongside.
+    # Ingest still succeeds; a 'graph' partial job records the chunk failures.
     assert result.skipped is False
     steps = {(step, status) for step, status, _ in store.jobs}
-    assert ("graph", "failed") in steps
+    assert ("graph", "partial") in steps
     assert ("ingest", "done") in steps
+
+
+async def test_one_failing_chunk_does_not_abort_the_rest(store) -> None:
+    """A single chunk's extraction failure must not skip the remaining chunks
+    (regression: the try/except used to wrap the whole loop)."""
+
+    class FlakyGraph:
+        def __init__(self): self.upserts = []
+        async def upsert_extraction(self, chunk_id, extraction):
+            # fail only the first upsert, succeed afterwards
+            if not self.upserts and not getattr(self, "_failed", False):
+                self._failed = True
+                raise RuntimeError("transient neo4j error")
+            self.upserts.append(chunk_id)
+
+    graph = FlakyGraph()
+    ext = '{"entities":[{"name":"E","type":"OTHER"}],"relations":[]}'
+    # force several chunks
+    orch = IngestionOrchestrator(store, FakeGateway(extraction=ext), graph=graph,
+                                 chunk_size=40, chunk_overlap=8)
+    text = ". ".join(f"sentence {i} mentions E" for i in range(40))
+    await orch.ingest_text(text)
+
+    # later chunks still got upserted despite the first failing
+    assert len(graph.upserts) >= 1
+    steps = {(step, status) for step, status, _ in store.jobs}
+    assert ("graph", "partial") in steps        # the one failure was recorded
+    assert ("ingest", "done") in steps          # ingest still succeeded
