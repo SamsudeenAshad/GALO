@@ -307,6 +307,36 @@ async function api(method, path, body) {
 function setOut(el, c, err) { el.classList.remove("empty"); el.classList.toggle("err", !!err); el.textContent = c; }
 function loading(el, m) { el.classList.remove("empty","err"); el.innerHTML = '<span class="spin"></span>' + m; }
 
+// Minimal, safe markdown → HTML for LLM answers (escape first, then format).
+function renderMarkdown(src) {
+  const esc = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const inline = (s) => esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[(\d+)\]/g, '<span class="ref">[$1]</span>');
+  const lines = src.replace(/\r\n/g, "\n").split("\n");
+  let html = "", list = null;
+  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (let raw of lines) {
+    const line = raw.trimEnd();
+    let m;
+    if ((m = line.match(/^\s*[-*]\s+(.*)/))) {
+      if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; }
+      html += "<li>" + inline(m[1]) + "</li>";
+    } else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) {
+      if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; }
+      html += "<li>" + inline(m[1]) + "</li>";
+    } else if (line.trim() === "") {
+      closeList();
+    } else {
+      closeList();
+      html += "<p>" + inline(line) + "</p>";
+    }
+  }
+  closeList();
+  return html;
+}
+
 $("themeBtn").onclick = () => {
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
   document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
