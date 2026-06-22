@@ -134,6 +134,16 @@
 
   /* ===== main stage: query hero ===== */
   main { padding: 26px 30px; display: flex; flex-direction: column; gap: 20px; }
+  .tabs { display: flex; gap: 10px; }
+  .tab { padding: 9px 22px; border-radius: 12px; font-weight: 700; font-size: 12.5px;
+         text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .tab.active { color: var(--accent);
+                box-shadow: inset 3px 3px 7px var(--shadow-d), inset -3px -3px 7px var(--shadow-l); }
+  #view-ask, #view-graph { display: flex; flex-direction: column; gap: 20px; }
+  .graphWell { position: relative; }
+  .ev-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+              text-align: center; padding: 0 40px; color: var(--muted); font-style: italic; font-size: 13px; }
+  .graphWell.has-data .ev-empty { display: none; }
   .ask-wrap { display: flex; flex-direction: column; gap: 12px; }
   .ask-title { font-size: 13px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted);
                display: flex; align-items: center; gap: 9px; }
@@ -268,31 +278,53 @@
     </details>
   </aside>
 
-  <!-- ============ MAIN STAGE (query hero + graph evidence) ============ -->
+  <!-- ============ MAIN STAGE ============ -->
   <main>
-    <div class="ask-wrap">
-      <div class="ask-title">Ask <span class="pill">GraphRAG</span></div>
-      <div class="ask-bar">
-        <input type="text" id="q-text" placeholder="What databases does GALO use, and what is each for?"
-               onkeydown="if(event.key==='Enter')query()">
-        <button class="primary" id="q-btn" onclick="query()">Ask</button>
-      </div>
+    <div class="tabs">
+      <button class="tab active" id="tab-ask" onclick="showTab('ask')">Ask</button>
+      <button class="tab" id="tab-graph" onclick="showTab('graph')">Knowledge Graph</button>
     </div>
 
-    <div class="answer-card raised">
-      <div class="answer empty" id="q-answer">Ask a question to retrieve a grounded, cited answer from the knowledge base.</div>
-      <div class="cites" id="q-cites"></div>
-    </div>
-
-    <div class="graph-section">
-      <div class="graph-head">
-        <span class="ttl">Knowledge graph</span>
-        <span class="meta" id="graph-meta"></span>
-        <button class="reload" id="graph-btn" onclick="loadGraph()">↻ Reload</button>
+    <!-- ---- ASK TAB ---- -->
+    <section id="view-ask">
+      <div class="ask-wrap">
+        <div class="ask-title">Ask <span class="pill">GraphRAG</span></div>
+        <div class="ask-bar">
+          <input type="text" id="q-text" placeholder="What databases does GALO use, and what is each for?"
+                 onkeydown="if(event.key==='Enter')query()">
+          <button class="primary" id="q-btn" onclick="query()">Ask</button>
+        </div>
       </div>
-      <div class="graphWell inset"><canvas id="graph"></canvas></div>
-      <div class="legend" id="legend"></div>
-    </div>
+
+      <div class="answer-card raised">
+        <div class="answer empty" id="q-answer">Ask a question to retrieve a grounded, cited answer from the knowledge base.</div>
+        <div class="cites" id="q-cites"></div>
+      </div>
+
+      <div class="graph-section">
+        <div class="graph-head">
+          <span class="ttl">Evidence graph</span>
+          <span class="meta" id="ev-meta"></span>
+        </div>
+        <div class="graphWell inset"><canvas id="ev-graph"></canvas>
+          <div class="ev-empty" id="ev-empty">Ask a question — the entities and relationships used to answer it appear here.</div>
+        </div>
+        <div class="legend" id="ev-legend"></div>
+      </div>
+    </section>
+
+    <!-- ---- KNOWLEDGE GRAPH TAB ---- -->
+    <section id="view-graph" hidden>
+      <div class="graph-section">
+        <div class="graph-head">
+          <span class="ttl">Full knowledge graph</span>
+          <span class="meta" id="graph-meta"></span>
+          <button class="reload" id="graph-btn" onclick="loadGraph()">↻ Reload</button>
+        </div>
+        <div class="graphWell inset"><canvas id="graph"></canvas></div>
+        <div class="legend" id="legend"></div>
+      </div>
+    </section>
   </main>
 </div>
 
