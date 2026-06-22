@@ -179,13 +179,24 @@
       <div class="raised"><div class="n" id="stat-entities">–</div><div class="lbl">entities</div></div>
     </div>
 
-    <details class="tool raised">
+    <details class="tool raised" open>
       <summary><span class="ic">＋</span>Ingest document<span class="chev">▶</span></summary>
       <div class="body">
         <div><label>Title</label><input type="text" id="ing-title" placeholder="Optional"></div>
-        <div><label>Text</label><textarea id="ing-text" placeholder="Paste document text…"></textarea></div>
-        <button class="primary" id="ing-btn" onclick="ingest()">Ingest</button>
-        <span class="hint">chunk → embed → extract entities</span>
+
+        <label>Upload file</label>
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="ing-file" accept=".pdf,.docx,.md,.markdown,.txt,.csv,.json"
+                 onchange="onFilePicked()" hidden>
+          <span id="dz-text">📄 Drop a PDF / DOCX / TXT here, or click to browse</span>
+        </label>
+        <button class="primary" id="ing-file-btn" onclick="ingestFile()" disabled>Upload & ingest</button>
+
+        <div class="or">— or paste text —</div>
+        <textarea id="ing-text" placeholder="Paste document text…"></textarea>
+        <button id="ing-btn" onclick="ingest()">Ingest text</button>
+
+        <span class="hint">parse → chunk → embed → extract entities</span>
         <div class="out inset empty" id="ing-out">no result yet</div>
       </div>
     </details>
