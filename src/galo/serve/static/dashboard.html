@@ -306,7 +306,7 @@
           <span class="ttl">Evidence graph</span>
           <span class="meta" id="ev-meta"></span>
         </div>
-        <div class="graphWell inset"><canvas id="ev-graph"></canvas>
+        <div class="graphWell inset" id="graphWellEv"><canvas id="ev-graph"></canvas>
           <div class="ev-empty" id="ev-empty">Ask a question — the entities and relationships used to answer it appear here.</div>
         </div>
         <div class="legend" id="ev-legend"></div>
@@ -440,6 +440,8 @@ async function ingestFile() {
 async function query() {
   const b = $("q-btn"); b.disabled = true;
   loading($("q-answer"), "retrieving + generating…"); $("q-cites").innerHTML = "";
+  // reset evidence graph for the new question
+  $("graphWellEv").classList.remove("has-data"); $("ev-meta").textContent = ""; $("ev-empty").textContent = "building evidence graph…";
   try {
     const r = await api("POST","/query",{ question: $("q-text").value });
     const a = $("q-answer"); a.classList.remove("empty","err");
@@ -448,8 +450,12 @@ async function query() {
       $("q-cites").innerHTML = '<div class="lbl">Sources</div>' + r.citations.map((c,i) =>
         `<div class="cite inset"><b>[${i+1}]</b> chunk ${c.chunk_id.slice(0,8)} · score ${c.score.toFixed(4)}` +
         (c.graph_path && c.graph_path.length ? ` · <span class="gp">${c.graph_path.join(" → ")}</span>` : "") + `</div>`).join("");
+      // populate the evidence graph from the cited chunks
+      loadEvidence(r.citations.map(c => c.chunk_id));
+    } else {
+      $("ev-empty").textContent = "no sources cited for this answer";
     }
-  } catch (e) { setOut($("q-answer"), "Error: " + e.message, true); }
+  } catch (e) { setOut($("q-answer"), "Error: " + e.message, true); $("ev-empty").textContent = "Ask a question — the entities used to answer it appear here."; }
   b.disabled = false;
 }
 async function recommend() {
@@ -473,93 +479,102 @@ async function findPath() {
   } catch (e) { setOut($("path-out"), "Error: " + e.message, true); }
 }
 
-// ---- force-directed graph ----
+// ---- force-directed graph (reusable per-canvas instance) ----
 const TYPE_COLORS = { PERSON:"#f778ba", ORG:"#6d8dc7", CONCEPT:"#57cc99", PLACE:"#e9c46a", OTHER:"#9aa5b1" };
-const cv = $("graph"), ctx = cv.getContext("2d");
-let G = { nodes: [], edges: [] }, drag = null, hover = null, raf = null;
-function resizeCanvas() { const p = window.devicePixelRatio||1; cv.width = cv.clientWidth*p; cv.height = 480*p; ctx.setTransform(p,0,0,p,0,0); }
-async function loadGraph() {
-  const b = $("graph-btn"); b.disabled = true;
-  try {
-    const data = await api("GET","/graph?limit=60"); const W = cv.clientWidth, H = 480;
+const nodeR = (n) => 6 + Math.min(n.degree, 9);
+
+function GraphView(canvasId, legendId) {
+  const cv = $(canvasId), ctx = cv.getContext("2d");
+  const H = 480;
+  let G = { nodes: [], edges: [] }, drag = null, hover = null, raf = null;
+
+  function resize() { const p = window.devicePixelRatio||1; cv.width = cv.clientWidth*p; cv.height = H*p; ctx.setTransform(p,0,0,p,0,0); }
+  function setData(data) {
+    const W = cv.clientWidth || 600;
     G.nodes = data.nodes.map((n,i) => ({ ...n, x: W/2+Math.cos(i*1.7)*120, y: H/2+Math.sin(i*1.7)*95, vx:0, vy:0 }));
     const by = Object.fromEntries(G.nodes.map(n => [n.id, n]));
     G.edges = data.edges.map(e => ({ ...e, s: by[e.source], t: by[e.target] })).filter(e => e.s && e.t);
-    $("graph-meta").textContent = `${G.nodes.length} nodes · ${G.edges.length} edges`;
-    const types = [...new Set(G.nodes.map(n => n.type))];
-    $("legend").innerHTML = types.map(t => `<span><i style="background:${TYPE_COLORS[t]||TYPE_COLORS.OTHER}"></i>${t}</span>`).join("");
-    if (raf) cancelAnimationFrame(raf); tick(300);
-  } catch (e) { ctx.clearRect(0,0,cv.width,cv.height); ctx.fillStyle = "#e07a5f"; ctx.font = "13px system-ui"; ctx.fillText("graph unavailable: "+e.message, 14, 26); }
+    if (legendId) {
+      const types = [...new Set(G.nodes.map(n => n.type))];
+      $(legendId).innerHTML = types.map(t => `<span><i style="background:${TYPE_COLORS[t]||TYPE_COLORS.OTHER}"></i>${t}</span>`).join("");
+    }
+    resize(); if (raf) cancelAnimationFrame(raf); tick(300);
+  }
+  function clearErr(msg) { ctx.clearRect(0,0,cv.width,cv.height); ctx.fillStyle="#e07a5f"; ctx.font="13px system-ui"; ctx.fillText(msg,14,26); }
+  function count() { return { n: G.nodes.length, e: G.edges.length }; }
+
+  function simStep() {
+    const W = cv.clientWidth, ns = G.nodes;
+    for (let i=0;i<ns.length;i++) for (let j=i+1;j<ns.length;j++){ const a=ns[i],b=ns[j]; let dx=a.x-b.x,dy=a.y-b.y; let d2=dx*dx+dy*dy||0.01; let f=Math.min(6000/d2,4); const d=Math.sqrt(d2),ux=dx/d,uy=dy/d; a.vx+=ux*f;a.vy+=uy*f;b.vx-=ux*f;b.vy-=uy*f; }
+    for (const e of G.edges){ let dx=e.t.x-e.s.x,dy=e.t.y-e.s.y; const d=Math.sqrt(dx*dx+dy*dy)||0.01; const f=(d-120)*0.012,ux=dx/d,uy=dy/d; e.s.vx+=ux*f;e.s.vy+=uy*f;e.t.vx-=ux*f;e.t.vy-=uy*f; }
+    for (const n of ns){ if (n===drag){ n.vx=n.vy=0; continue; } n.vx+=(W/2-n.x)*0.0012; n.vy+=(H/2-n.y)*0.0012; n.vx*=0.85;n.vy*=0.85;n.x+=n.vx;n.y+=n.vy; }
+    for (let pass=0;pass<2;pass++) for (let i=0;i<ns.length;i++) for (let j=i+1;j<ns.length;j++){ const a=ns[i],b=ns[j]; let dx=b.x-a.x,dy=b.y-a.y; let d=Math.sqrt(dx*dx+dy*dy)||0.01; const minD=nodeR(a)+nodeR(b)+22; if (d<minD){ const push=(minD-d)/2,ux=dx/d,uy=dy/d; if(a!==drag){a.x-=ux*push;a.y-=uy*push;} if(b!==drag){b.x+=ux*push;b.y+=uy*push;} } }
+    for (const n of ns){ const r=nodeR(n); n.x=Math.max(r+6,Math.min(W-r-6,n.x)); n.y=Math.max(r+6,Math.min(H-r-6,n.y)); }
+  }
+  function draw() {
+    const css = getComputedStyle(document.documentElement);
+    const edge = css.getPropertyValue("--shadow-d").trim(), txt = css.getPropertyValue("--text").trim();
+    ctx.clearRect(0,0,cv.clientWidth,H); ctx.strokeStyle = edge; ctx.lineWidth = 1.2;
+    for (const e of G.edges){ ctx.beginPath(); ctx.moveTo(e.s.x,e.s.y); ctx.lineTo(e.t.x,e.t.y); ctx.stroke(); }
+    const labelAll = G.nodes.length <= 18;
+    for (const n of G.nodes){
+      const r = nodeR(n);
+      // seed (answer-relevant) nodes get a ring
+      if (n.seed) { ctx.beginPath(); ctx.arc(n.x,n.y,r+3,0,Math.PI*2); ctx.strokeStyle = txt; ctx.lineWidth = 1.5; ctx.stroke(); }
+      ctx.beginPath(); ctx.arc(n.x,n.y,r,0,Math.PI*2); ctx.fillStyle = TYPE_COLORS[n.type]||TYPE_COLORS.OTHER; ctx.fill();
+      if (labelAll || n.seed || n.degree >= 1 || n === hover || n === drag) {
+        const focus = (n === hover || n === drag || n.seed);
+        ctx.fillStyle = txt; ctx.font = (focus ? "600 " : "") + "11px system-ui"; ctx.fillText(n.name, n.x+r+4, n.y+4);
+      }
+    }
+  }
+  function tick(f){ simStep(); draw(); if (f>0 || drag) raf = requestAnimationFrame(()=>tick(f-1)); }
+  function nodeAt(mx,my){ for (const n of G.nodes){ const r=nodeR(n)+5; if ((n.x-mx)**2+(n.y-my)**2<=r*r) return n; } return null; }
+  cv.addEventListener("mousedown", ev => { const b=cv.getBoundingClientRect(); drag=nodeAt(ev.clientX-b.left,ev.clientY-b.top); if (drag){ cv.style.cursor="grabbing"; if(!raf) tick(0); } });
+  cv.addEventListener("mousemove", ev => { const b=cv.getBoundingClientRect(); const h=nodeAt(ev.clientX-b.left,ev.clientY-b.top); if (h!==hover){ hover=h; cv.style.cursor=h?"pointer":"grab"; if(!raf) draw(); } });
+  cv.addEventListener("mouseleave", () => { if (hover){ hover=null; if(!raf) draw(); } });
+  window.addEventListener("mousemove", ev => { if (!drag) return; const b=cv.getBoundingClientRect(); drag.x=ev.clientX-b.left; drag.y=ev.clientY-b.top; });
+  window.addEventListener("mouseup", () => { if (drag){ drag=null; cv.style.cursor="grab"; tick(80); } });
+  window.addEventListener("resize", () => { resize(); draw(); });
+
+  return { setData, clearErr, count, redraw: draw, relayout: () => tick(300) };
+}
+
+const fullGraph = GraphView("graph", "legend");
+const evGraph = GraphView("ev-graph", "ev-legend");
+
+async function loadGraph() {
+  const b = $("graph-btn"); b.disabled = true;
+  try {
+    const data = await api("GET","/graph?limit=60");
+    fullGraph.setData(data);
+    const c = fullGraph.count(); $("graph-meta").textContent = `${c.n} nodes · ${c.e} edges`;
+  } catch (e) { fullGraph.clearErr("graph unavailable: " + e.message); }
   b.disabled = false;
 }
-function nodeR(n){ return 6 + Math.min(n.degree, 9); }
-function simStep() {
-  const W = cv.clientWidth, H = 480, ns = G.nodes;
-  // charge repulsion (capped so overlapping nodes don't fling apart violently)
-  for (let i=0;i<ns.length;i++) for (let j=i+1;j<ns.length;j++){
-    const a=ns[i],b=ns[j]; let dx=a.x-b.x,dy=a.y-b.y; let d2=dx*dx+dy*dy||0.01;
-    let f=Math.min(6000/d2, 4); const d=Math.sqrt(d2),ux=dx/d,uy=dy/d;
-    a.vx+=ux*f;a.vy+=uy*f;b.vx-=ux*f;b.vy-=uy*f;
-  }
-  // spring attraction along edges
-  for (const e of G.edges){
-    let dx=e.t.x-e.s.x,dy=e.t.y-e.s.y; const d=Math.sqrt(dx*dx+dy*dy)||0.01;
-    const f=(d-120)*0.012,ux=dx/d,uy=dy/d;
-    e.s.vx+=ux*f;e.s.vy+=uy*f;e.t.vx-=ux*f;e.t.vy-=uy*f;
-  }
-  // integrate + gentle centering + damping
-  for (const n of ns){
-    if (n===drag){ n.vx=n.vy=0; continue; }
-    n.vx+=(W/2-n.x)*0.0012; n.vy+=(H/2-n.y)*0.0012;
-    n.vx*=0.85;n.vy*=0.85;n.x+=n.vx;n.y+=n.vy;
-  }
-  // hard collision separation — guarantees no two nodes (incl. label band) overlap
-  for (let pass=0; pass<2; pass++){
-    for (let i=0;i<ns.length;i++) for (let j=i+1;j<ns.length;j++){
-      const a=ns[i],b=ns[j]; let dx=b.x-a.x,dy=b.y-a.y;
-      let d=Math.sqrt(dx*dx+dy*dy)||0.01;
-      const minD = nodeR(a)+nodeR(b)+22;          // +22 ≈ label/breathing room
-      if (d<minD){ const push=(minD-d)/2, ux=dx/d, uy=dy/d;
-        if (a!==drag){ a.x-=ux*push; a.y-=uy*push; }
-        if (b!==drag){ b.x+=ux*push; b.y+=uy*push; } }
-    }
-  }
-  // clamp to canvas with margin
-  for (const n of ns){ const r=nodeR(n);
-    n.x=Math.max(r+6,Math.min(W-r-6,n.x)); n.y=Math.max(r+6,Math.min(H-r-6,n.y)); }
-}
-function draw() {
-  const css = getComputedStyle(document.documentElement);
-  const edge = css.getPropertyValue("--shadow-d").trim(), txt = css.getPropertyValue("--text").trim();
-  ctx.clearRect(0,0,cv.clientWidth,480); ctx.strokeStyle = edge; ctx.lineWidth = 1.2;
-  for (const e of G.edges){ ctx.beginPath(); ctx.moveTo(e.s.x,e.s.y); ctx.lineTo(e.t.x,e.t.y); ctx.stroke(); }
-  // Threshold so dense graphs aren't a wall of text: only label connected /
-  // high-degree nodes (+ the hovered/dragged one). Sparse graphs label all.
-  const labelAll = G.nodes.length <= 14;
-  for (const n of G.nodes){
-    const r = nodeR(n);
-    ctx.beginPath(); ctx.arc(n.x,n.y,r,0,Math.PI*2);
-    ctx.fillStyle = TYPE_COLORS[n.type]||TYPE_COLORS.OTHER; ctx.fill();
-    if (labelAll || n.degree >= 1 || n === hover || n === drag) {
-      const focus = (n === hover || n === drag);
-      ctx.fillStyle = txt; ctx.font = (focus ? "600 " : "") + "11px system-ui";
-      ctx.fillText(n.name, n.x+r+4, n.y+4);
-    }
-  }
-}
-function tick(f){ simStep(); draw(); if (f>0 || drag) raf = requestAnimationFrame(()=>tick(f-1)); }
-function nodeAt(mx,my){ for (const n of G.nodes){ const r=nodeR(n)+5; if ((n.x-mx)**2+(n.y-my)**2<=r*r) return n; } return null; }
-cv.addEventListener("mousedown", ev => { const b=cv.getBoundingClientRect(); drag=nodeAt(ev.clientX-b.left,ev.clientY-b.top); if (drag){ cv.style.cursor="grabbing"; if(!raf) tick(0); } });
-cv.addEventListener("mousemove", ev => {
-  const b=cv.getBoundingClientRect(); const h = nodeAt(ev.clientX-b.left, ev.clientY-b.top);
-  if (h !== hover) { hover = h; cv.style.cursor = h ? "pointer" : "grab"; if (!raf) draw(); }
-});
-cv.addEventListener("mouseleave", () => { if (hover) { hover = null; if (!raf) draw(); } });
-window.addEventListener("mousemove", ev => { if (!drag) return; const b=cv.getBoundingClientRect(); drag.x=ev.clientX-b.left; drag.y=ev.clientY-b.top; });
-window.addEventListener("mouseup", () => { if (drag){ drag=null; cv.style.cursor="grab"; tick(80); } });
-window.addEventListener("resize", () => { resizeCanvas(); draw(); });
 
-resizeCanvas(); refresh(); loadGraph(); setInterval(refresh, 15000);
+async function loadEvidence(chunkIds) {
+  try {
+    const data = await api("POST","/graph/subgraph",{ chunk_ids: chunkIds });
+    if (!data.nodes.length) { $("ev-meta").textContent = "no graph entities for these sources"; return; }
+    $("graphWellEv").classList.add("has-data");
+    evGraph.setData(data);
+    const c = evGraph.count(); const seeds = data.nodes.filter(n => n.seed).length;
+    $("ev-meta").textContent = `${seeds} answer entities · ${c.n} nodes · ${c.e} edges`;
+  } catch (e) { evGraph.clearErr("evidence graph unavailable: " + e.message); }
+}
+
+// ---- tabs ----
+function showTab(name) {
+  const ask = name === "ask";
+  $("view-ask").hidden = !ask; $("view-graph").hidden = ask;
+  $("tab-ask").classList.toggle("active", ask); $("tab-graph").classList.toggle("active", !ask);
+  // (re)draw whichever graph just became visible so canvas sizing is correct
+  if (ask) evGraph.redraw(); else { if (!fullGraphLoaded) { loadGraph(); fullGraphLoaded = true; } fullGraph.relayout(); }
+}
+let fullGraphLoaded = false;
+
+refresh(); setInterval(refresh, 15000);
 </script>
 </body>
 </html>
