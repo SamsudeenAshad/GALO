@@ -1,307 +1,213 @@
-# GALO — Graph Aware Learning Orchestration System
+# GALO — Architecture
 
-**Design & Architecture Document**
-Version 0.1 · 2026-06-19 · Status: Draft
+**Graph Aware Learning Orchestration System** · self-hosted GraphRAG platform
+Version 0.1 · Python 3.12+ · Apache-2.0
 
----
-
-## 1. Overview
-
-GALO is a self-hosted GraphRAG platform. It ingests documents, extracts a
-knowledge graph of entities and relationships, embeds text chunks as vectors,
-and serves retrieval-augmented answers, recommendations, and learning paths by
-**combining graph traversal with vector similarity**.
-
-The defining idea: structure and semantics live in separate stores, each doing
-what it is best at, and an orchestration layer joins them per query.
-
-- **Neo4j (Community Edition)** — *structure*: entities, relationships, topology,
-  graph algorithms (paths, communities, centrality).
-- **Postgres + pgvector** — *semantics*: chunk embeddings, dense vector search,
-  plus relational metadata (documents, chunks, jobs, provenance).
-- **Ollama (self-hosted)** — *intelligence*: embeddings + generation, served at
-  `http://zuselk-node-001.tru.zt:11434/` (model tag configurable, e.g. `gemma3`).
-
-All three components are self-hosted. No external API dependency is required.
-
-### 1.1 Goals
-
-1. **Platform, not point solution** — cover ingestion, retrieval, and serving.
-2. **Hybrid retrieval** — graph + vector, fused, not either/or.
-3. **Provenance everywhere** — every answer traces to source chunks and graph paths.
-4. **Pluggable model layer** — Ollama today; swap models/providers via one interface.
-5. **Operable** — observable, idempotent ingestion, reproducible runs.
-
-### 1.2 Non-goals (v0)
-
-- Multi-tenant isolation / per-tenant encryption (single-tenant first).
-- Distributed training of GNNs (we use graph *algorithms*, not learned GNNs, in v0).
-- Real-time streaming ingestion (batch + incremental first).
+> Companion diagram: [`architecture.excalidraw`](architecture.excalidraw)
+> (open at [excalidraw.com](https://excalidraw.com) → *Open*).
 
 ---
 
-## 2. The data split (why two stores)
+## 1. What GALO is
 
-| Concern                       | Store            | Rationale |
-|-------------------------------|------------------|-----------|
-| Entities & relationships      | Neo4j            | Native traversal, Cypher, graph algos (APOC/GDS-lite). |
-| Topology queries (paths, neighbors) | Neo4j      | Multi-hop expansion is a join-heavy nightmare in SQL. |
-| Chunk embeddings + ANN search | pgvector         | Mature ANN (HNSW/IVFFlat), SQL filtering, scales on commodity Postgres. |
-| Documents, chunks, jobs, runs | Postgres         | Relational metadata, transactions, provenance. |
-| Source of truth for raw text  | Postgres         | One canonical text store; Neo4j references chunk IDs, never duplicates text. |
+GALO ingests documents, builds a **knowledge graph** of the entities and
+relationships in them, embeds the text as **vectors**, and answers questions by
+**combining graph traversal with vector similarity** (GraphRAG). It also serves
+recommendations and learning paths over the same graph.
 
-**Linking key.** Both stores share stable IDs. A Neo4j `:Entity` node carries
-`chunk_ids: [uuid]` (the chunks that mention it); a pgvector `chunk` row carries
-`entity_ids: [uuid]` (entities extracted from it). This bidirectional link is the
-seam the orchestrator walks across during hybrid retrieval.
+Everything is **self-hosted** — no external API. Three backing services:
 
-> **Decision:** Embeddings live **only** in pgvector, not in Neo4j's vector index.
-> Reason: one ANN engine to tune, SQL pre-filtering, and Community Edition keeps
-> Neo4j lean for what it's uniquely good at. Revisit if cross-store latency hurts.
+| Service | Role | Why |
+|---------|------|-----|
+| **Neo4j (Community)** | *structure* — entities, relationships, topology | native traversal, Cypher, graph algorithms |
+| **Postgres + pgvector** | *semantics* — chunk embeddings + relational metadata | mature ANN (HNSW), SQL filtering, source of truth for text |
+| **Ollama** | *intelligence* — embeddings + generation | on-prem models, no data leaves the network |
+
+The defining idea: **structure and semantics live in separate stores**, and an
+orchestration layer joins them per request. A chunk can surface in an answer
+because it is *one hop from an entity the question is about* — not only because
+it is semantically similar.
+
+---
+
+## 2. The two-store split & the linking seam
+
+Embeddings live **only in pgvector**; the graph lives **only in Neo4j**. They are
+joined by a bidirectional ID link:
+
+```
+ Neo4j (:Entity)                         Postgres (chunks)
+ ┌────────────────────────┐              ┌─────────────────────────┐
+ │ id, name, type          │   chunk_ids │ id, document_id, text     │
+ │ chunk_ids: [uuid] ──────┼────────────▶│ embedding vector(768)     │
+ │                         │◀────────────┼─ entity_ids: uuid[]        │
+ │ (:Entity)-[:RELATED]->  │  entity_ids │                           │
+ └────────────────────────┘              └─────────────────────────┘
+```
+
+- An `:Entity` carries the `chunk_ids` it was mentioned in.
+- A `chunk` row carries the `entity_ids` extracted from it.
+
+This seam is what the retriever walks across: vector hits → their entities →
+graph neighbors → those neighbors' chunks.
+
+**Postgres is the source of truth for text; Neo4j is rebuildable** from it (see
+the reconcile job, §6).
 
 ---
 
 ## 3. High-level architecture
 
 ```
-                      ┌─────────────────────────────────────────┐
-                      │              API / Serving               │
-                      │  FastAPI: /ingest /query /recommend /path │
-                      └───────────────┬──────────────────────────┘
-                                      │
-                 ┌────────────────────┼─────────────────────┐
-                 ▼                    ▼                       ▼
-        ┌─────────────────┐  ┌─────────────────┐   ┌──────────────────┐
-        │   Ingestion     │  │   Retrieval     │   │   Generation     │
-        │   Orchestrator  │  │   Orchestrator  │   │   Orchestrator   │
-        └────────┬────────┘  └────────┬────────┘   └────────┬─────────┘
-                 │                     │                     │
-   ┌─────────────┼──────────┐         │                     │
-   ▼             ▼          ▼         ▼                     ▼
-┌────────┐ ┌──────────┐ ┌────────┐ ┌──────────────────────────────────┐
-│ Loader │ │ Chunker  │ │ Entity │ │        Model Gateway (Ollama)     │
-│        │ │          │ │ + Rel  │ │   embed() · generate() · rerank() │
-└────────┘ └──────────┘ │ Extract│ └──────────────────────────────────┘
-                        └────────┘
-        │                     │
-   ┌────┴─────┐         ┌─────┴──────┐
-   ▼          ▼         ▼            ▼
-┌──────┐  ┌─────────┐ ┌──────┐  ┌─────────┐
-│Neo4j │  │pgvector │ │Neo4j │  │pgvector │
-└──────┘  └─────────┘ └──────┘  └─────────┘
+                          ┌────────────────────────────────────────────┐
+   Browser ──────────────▶│  FastAPI app (galo.serve)                    │
+   dashboard.html         │  request-id + JSON access-log middleware     │
+   graph.html             └───────────────┬──────────────────────────────┘
+                                           │
+          ┌────────────────┬───────────────┼────────────────┬──────────────┐
+          ▼                ▼               ▼                ▼              ▼
+      /ingest          /query         /recommend         /graph        /health
+      /ingest/file                    /path              /graph/subgraph /stats /jobs
+          │                │               │                │
+          ▼                ▼               ▼                ▼
+   ┌─────────────┐  ┌──────────────┐  ┌──────────────┐  graph snapshots
+   │ Ingestion   │  │ Retrieval    │  │ recommend /  │
+   │ Orchestrator│  │ Orchestrator │  │ path modules │
+   └──────┬──────┘  └──────┬───────┘  └──────┬───────┘
+          │                │                 │
+          │     ┌──────────┴─────────┐       │
+          ▼     ▼                    ▼       ▼
+   ┌──────────────────────┐   ┌──────────────────────────────────┐
+   │  Model Gateway        │   │   Stores                          │
+   │  (galo.models)        │   │   PgStore  ·  Neo4jStore           │
+   │  embed · generate     │   └──────────────────────────────────┘
+   └──────────┬───────────┘            │              │
+              ▼                        ▼              ▼
+         Ollama node            Postgres+pgvector   Neo4j
 ```
 
-Three orchestrators, one shared **Model Gateway**, two stores. Each orchestrator
-is a coordinator: it sequences steps, handles retries/idempotency, and is the
-only place that knows about *both* stores at once.
+Plus **out-of-band maintenance** (`galo.maintain`): entity resolution + reconcile.
 
 ---
 
-## 4. Component design
+## 4. Components
 
-### 4.1 Model Gateway (`galo.models`)
+### 4.1 Model Gateway — `galo.models`
+The single boundary to Ollama. Everything depends on the `ModelGateway`
+Protocol, never on a concrete backend.
+- `gateway.py` — `ModelGateway` protocol (`embed`, `generate`, `health`, `aclose`)
+- `ollama.py` — `OllamaGateway`; validates that returned embedding dim equals
+  the configured `embed_dim` (mismatch = hard error).
 
-A single abstraction over the Ollama endpoint so the rest of the system never
-hardcodes a model or URL.
+### 4.2 Stores — `galo.stores`
+- `pg.py` — `PgStore`: async pool; `migrate()` (templates the embedding dim into
+  `schema.sql`), document/chunk upserts, `search_vectors()` (cosine ANN),
+  `chunks_for_entities()`, jobs, stats.
+- `neo4j.py` — `Neo4jStore`: async driver; `upsert_extraction()`, `expand()`
+  (N-hop traversal), `graph_snapshot()`, `subgraph_for_chunks()` (evidence
+  subgraph), `merge_entities()`, recommend/path helpers.
+- `schema.sql` — `documents`, `chunks (vector{EMBED_DIM}, HNSW + GIN)`, `jobs`.
 
-```python
-class ModelGateway(Protocol):
-    async def embed(self, texts: list[str]) -> list[Vector]: ...
-    async def generate(self, prompt: str, *, system: str | None = None,
-                       stream: bool = False) -> str | AsyncIterator[str]: ...
-    async def rerank(self, query: str, docs: list[str]) -> list[float]: ...
-```
+### 4.3 Ingestion — `galo.ingest`
+Pipeline, idempotent per content hash:
+**load/parse → chunk → embed → persist → extract → graph upsert → backlink.**
+- `parse.py` — local file parsing: **PDF (pypdf), DOCX (python-docx), MD/TXT**.
+  No cloud parser; nothing leaves the host.
+- `loader.py` — normalize text, content-hash, deterministic document id.
+- `chunker.py` — overlapping, boundary-aware windows.
+- `extract.py` — LLM entity/relation extraction with a defensive JSON parser.
+- `orchestrator.py` — sequences it all; graph step is **best-effort** (Postgres
+  is source of truth, graph is rebuildable), so a graph failure records a job
+  but does not fail ingest.
 
-- **Backend:** `OllamaGateway` hitting `/api/embeddings` and `/api/generate`
-  (or `/api/chat`). Base URL + model tags from config.
-- **Embedding model:** a dedicated embedding model (e.g. `nomic-embed-text` or
-  `bge-m3`), *not* the chat model — confirm what the node serves at deploy.
-- **Generation model:** `gemma3` (confirm exact tag pulled on the node).
-- **Dimensionality** is read from the embedding model and pinned in config; the
-  pgvector column dimension MUST match (see §5.2). Changing models = re-embed.
-- Retries with backoff, request timeout, and a circuit breaker; the gateway is
-  the single failure-isolation boundary for the model node.
+### 4.4 Retrieval — `galo.retrieve`
+The heart of GALO — **hybrid retrieval**:
+1. `vector.py` — embed query → pgvector ANN top-k.
+2. `graph.py` — seed entities from the vector hits → `expand()` N hops in Neo4j
+   → map neighbors back to chunks.
+3. `fuse.py` — **Reciprocal Rank Fusion** (rank-only, so it merges cosine
+   distance and graph hop-distance — two incomparable scales).
+4. `orchestrator.py` — assemble token-budgeted context → generate a grounded,
+   cited answer. `recommend.py` (graph neighbors ∩ semantic similarity, `alpha`
+   blend) and `path.py` (shortest `:PREREQUISITE` chain) reuse these primitives.
 
-### 4.2 Ingestion Orchestrator (`galo.ingest`)
+### 4.5 Serving — `galo.serve`
+FastAPI. Routes: `health`, `ingest` (+`/ingest/file`), `query`, `recommend`
+(+`/path`), `ops` (`/jobs`, `/stats`, `/graph`, `/graph/subgraph`), `dashboard`
+(`/`, `/graph-view`). `middleware.py` adds a request id + structured JSON
+access log. Two self-contained pages: `dashboard.html` (Ask + evidence graph)
+and `graph.html` (full-graph explorer at `/graph-view`).
 
-Pipeline, idempotent per `document_id` (content-hash dedupe):
-
-1. **Load** — pull raw bytes → text (loaders per type: md, pdf, html, txt).
-2. **Chunk** — split into overlapping chunks; record `(document_id, ord, text)`.
-3. **Embed** — `gateway.embed(chunks)` → write `chunk.embedding` to pgvector.
-4. **Extract** — LLM-driven entity + relation extraction over each chunk
-   (structured output: `entities[]`, `relations[]`).
-5. **Upsert graph** — MERGE entities/relations into Neo4j; attach `chunk_ids`.
-6. **Backlink** — write `entity_ids` onto the pgvector chunk rows.
-
-Idempotency: every step keyed by stable IDs + content hash; re-running a document
-updates in place. A `jobs` table tracks run state for resume/observability.
-
-> Entity-resolution (merging "NYC" ≈ "New York City") is a known hard problem.
-> v0: exact + normalized-name match. v1: embedding-similarity blocking + LLM
-> adjudication. Flagged as a roadmap risk, not solved here.
-
-### 4.3 Retrieval Orchestrator (`galo.retrieve`)
-
-The heart of GALO — **hybrid retrieval** fusing two signals:
-
-1. **Vector path** — embed query → pgvector ANN top-k chunks.
-2. **Graph path** — seed entities (from query NER or from the vector hits'
-   `entity_ids`) → traverse Neo4j N hops → collect neighbor entities → map back
-   to their `chunk_ids`.
-3. **Fuse** — combine candidate chunks from both paths via **Reciprocal Rank
-   Fusion (RRF)**; optionally rerank top-N with `gateway.rerank()`.
-4. **Assemble context** — dedupe, budget by token count, attach provenance
-   (chunk → document, and the graph path that surfaced it).
-
-This is what makes answers *graph aware*: a chunk can rank highly not because it
-is semantically similar to the query, but because it is one hop from an entity
-the query is about.
-
-### 4.4 Generation / Serving (`galo.serve`)
-
-FastAPI. Core endpoints:
-
-| Endpoint        | Purpose |
-|-----------------|---------|
-| `POST /ingest`  | Enqueue/run ingestion for documents. |
-| `POST /query`   | GraphRAG Q&A: hybrid retrieve → generate, with citations. |
-| `POST /recommend` | Next-item recommendations: graph relations + semantic similarity. |
-| `POST /path`    | Learning path: shortest/weighted traversal between concept nodes, ordered by prerequisite edges. |
-| `GET  /health`  | Liveness + dependency checks (Neo4j, Postgres, Ollama). |
-
-`/recommend` and `/path` reuse the same retrieval primitives — recommendation is
-graph neighborhood ∩ vector similarity; a learning path is a Neo4j traversal over
-`PREREQUISITE`/`RELATED` edges, re-ranked for the learner's current frontier.
+### 4.6 Maintenance — `galo.maintain` (out-of-band)
+- `resolve.py` — entity resolution v1: embedding-similarity blocking + optional
+  LLM adjudication + union-find merge into a canonical node.
+- `reconcile.py` — rebuild the Neo4j graph from Postgres chunks when the stores
+  drift; per-chunk failures are counted, not fatal.
 
 ---
 
-## 5. Data model
+## 5. Request flows
 
-### 5.1 Neo4j (structure)
+**Ingest** (`POST /ingest` or `/ingest/file`)
+`parse → hash (skip if exists) → chunk → embed(nomic) → write chunks+vectors →
+extract entities(gemma) → MERGE into Neo4j + write chunk↔entity backlinks → job=done`
 
-```cypher
-(:Entity   {id, name, normalized_name, type, chunk_ids: [uuid], created_at})
-(:Document {id, title, source_uri, content_hash})
-(:Concept  {id, name})   // optional curriculum layer for /path
+**Query** (`POST /query`)
+`embed question → pgvector ANN → seed entities → Neo4j N-hop expand →
+chunks_for_entities → RRF fuse → assemble context → generate(gemma) →
+answer + citations (chunk, score, graph_path)`
 
-(:Entity)-[:RELATED {type, weight, chunk_id}]->(:Entity)
-(:Concept)-[:PREREQUISITE]->(:Concept)
-(:Entity)-[:MENTIONED_IN]->(:Document)
-```
-
-Indexes on `Entity.id`, `Entity.normalized_name`, `Document.content_hash`.
-
-### 5.2 Postgres + pgvector (semantics + metadata)
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE documents (
-  id            uuid PRIMARY KEY,
-  title         text,
-  source_uri    text,
-  content_hash  text UNIQUE NOT NULL,
-  created_at    timestamptz DEFAULT now()
-);
-
-CREATE TABLE chunks (
-  id          uuid PRIMARY KEY,
-  document_id uuid REFERENCES documents(id) ON DELETE CASCADE,
-  ord         int  NOT NULL,
-  text        text NOT NULL,
-  entity_ids  uuid[] DEFAULT '{}',
-  embedding   vector(768)        -- DIM MUST MATCH the embedding model
-);
-
-CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX ON chunks USING gin (entity_ids);
-
-CREATE TABLE jobs (         -- ingestion run state / provenance
-  id           uuid PRIMARY KEY,
-  document_id  uuid,
-  step         text,
-  status       text,        -- pending|running|done|failed
-  error        text,
-  updated_at   timestamptz DEFAULT now()
-);
-```
-
-> The `vector(768)` dimension is a placeholder; set it to the deployed embedding
-> model's true dimension. This is a hard coupling — changing models requires a
-> migration + full re-embed.
+**Evidence graph** (`POST /graph/subgraph`, dashboard)
+After an answer, the cited `chunk_ids` → entities in those chunks (seeds) +
+their neighbors + edges → rendered as the subgraph that explains the answer.
 
 ---
 
-## 6. Cross-cutting concerns
+## 6. Cross-cutting
 
-- **Config** (`galo.config`): pydantic-settings, env-driven. Neo4j URI/creds,
-  Postgres DSN, Ollama base URL + `EMBED_MODEL` / `GEN_MODEL` tags, embed dim,
-  chunk size/overlap, retrieval k / hops / RRF params.
-- **Provenance:** responses carry `sources: [{chunk_id, document_id, score,
-  graph_path?}]`. Non-negotiable for trust and debugging.
-- **Observability:** structured logs, request IDs threaded through orchestrators,
-  `/health` dependency probes, ingestion `jobs` table as the audit trail.
-- **Idempotency & consistency:** Postgres is the source of truth for text;
-  Neo4j is rebuildable from Postgres + extraction. A reconcile job can rebuild
-  the graph from chunks if the two drift.
-- **Failure isolation:** Model Gateway is the only thing that talks to Ollama;
-  store clients are the only things that talk to their DBs. One boundary each.
+- **Config** (`config.py`): `pydantic-settings`, `GALO_`-prefixed env. Ollama
+  URL + model tags + `embed_dim`, PG DSN, Neo4j creds, retrieval k/hops/RRF,
+  chunk size/overlap. See `.env.example`.
+- **Provenance**: answers carry `citations` (chunk, document, score, graph path).
+- **Idempotency**: deterministic ids by content hash; re-ingesting is a no-op.
+- **Resilience**: dependency failures surface as `502` / `degraded` health, never
+  a 500; the app boots even when a backing service is down.
+- **Failure isolation**: only the gateway talks to Ollama; only the store clients
+  talk to their DBs.
 
 ---
 
-## 7. Technology stack
+## 7. Stack & layout
 
-| Layer        | Choice                              | Why |
-|--------------|-------------------------------------|-----|
-| Language     | Python 3.12+                        | Ecosystem for graph/vector/LLM. |
-| API          | FastAPI + uvicorn                   | Async, typed, OpenAPI out of the box. |
-| Async        | `asyncio` + `httpx`                 | Concurrent embed/extract; async Ollama calls. |
-| Postgres     | `asyncpg` / SQLAlchemy 2.x + `pgvector` | Async DB access, typed models. |
-| Neo4j        | official `neo4j` async driver       | Cypher, async sessions. |
-| Models       | Ollama (self-hosted)                | No external dependency, on-prem. |
-| Config       | `pydantic-settings`                 | Validated env config. |
-| Migrations   | Alembic (PG) + Cypher migration scripts | Reproducible schema. |
-| Packaging    | `uv` / `pyproject.toml`             | Fast, reproducible installs. |
-| Testing      | `pytest` + `testcontainers`         | Real Neo4j/PG in CI. |
-
----
-
-## 8. Proposed repository layout
+FastAPI · httpx · asyncpg · neo4j async driver · pypdf · python-docx · Ollama.
+Tests: pytest (48), stubbing the gateway/stores; the live stack runs Postgres +
+Neo4j in Docker against a self-hosted Ollama node.
 
 ```
-galo/
-  pyproject.toml
-  docs/ARCHITECTURE.md          ← this file
-  src/galo/
-    config.py
-    models/        gateway.py · ollama.py
-    stores/        pg.py · neo4j.py · schema.sql · migrations/
-    ingest/        loader.py · chunker.py · extract.py · orchestrator.py
-    retrieve/      vector.py · graph.py · fuse.py · orchestrator.py
-    serve/         app.py · routes/ · schemas.py
-  tests/
+src/galo/
+  config.py
+  models/   gateway.py · ollama.py
+  stores/   pg.py · neo4j.py · schema.sql
+  ingest/   parse.py · loader.py · chunker.py · extract.py · orchestrator.py
+  retrieve/ vector.py · graph.py · fuse.py · orchestrator.py · recommend.py · path.py
+  maintain/ resolve.py · reconcile.py
+  serve/    app.py · middleware.py · schemas.py · routes/ · static/{dashboard,graph}.html
+tests/      test_*.py
 ```
 
 ---
 
-## 9. Roadmap
+## 8. Status & open questions
 
-- **M0 — Skeleton:** config, store clients, Model Gateway, `/health`. Connectivity proven.
-- **M1 — Ingestion:** load → chunk → embed → pgvector. Documents searchable by vector.
-- **M2 — Graph:** entity/relation extraction → Neo4j upsert + backlinks.
-- **M3 — Hybrid retrieval:** vector ∪ graph → RRF → `/query` with citations.
-- **M4 — Platform endpoints:** `/recommend`, `/path` (curriculum layer).
-- **M5 — Hardening:** entity resolution v1, reconcile job, observability, load tests.
+Implemented end-to-end (ingest → graph → query → recommend → path), verified live
+against real Postgres + Neo4j + Ollama (`gemma4:e4b` generation,
+`nomic-embed-text` 768-dim embeddings).
 
----
-
-## 10. Open questions (need confirmation before M0)
-
-1. **Exact Ollama model tags** served on the node (generation + embedding) and
-   the **embedding dimension** — this pins the pgvector column.
-2. **Corpus characteristics** — document types, volume, update frequency
-   (drives chunker + ingestion mode: batch vs incremental).
-3. **Curriculum source for `/path`** — are `Concept`/`PREREQUISITE` edges
-   authored by hand, or inferred from the extracted graph?
-4. **Auth model** — is the API internal-only, or does it need authn/z in v0?
+Open / future:
+1. `:PREREQUISITE` curriculum edges are **hand-authored** (`set_prerequisite`);
+   inferring them from the extracted graph is future work.
+2. `/recommend` embeds bare entity *names* — a weak similarity signal; embedding
+   entity *context* would be stronger.
+3. Resolve/reconcile are modules, not yet exposed as an admin endpoint/CLI.
+4. Query-side entity extraction (NER) instead of seeding the graph only from
+   vector hits.
