@@ -59,7 +59,9 @@
 
   /* health strip */
   .health { display: flex; flex-direction: column; gap: 7px; padding: 13px; border-radius: var(--r); }
-  .health .hrow { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .health .hrow { display: flex; align-items: center; gap: 8px; font-size: 12px;
+                  color: #ffffff; }
+  [data-theme="dark"] .health .hrow { color: #000000; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); transition: .3s; }
   .dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
   .dot.bad { background: var(--bad); box-shadow: 0 0 6px var(--bad); }
@@ -134,12 +136,11 @@
 
   /* ===== main stage: query hero ===== */
   main { padding: 26px 30px; display: flex; flex-direction: column; gap: 20px; }
-  .tabs { display: flex; gap: 10px; }
-  .tab { padding: 9px 22px; border-radius: 12px; font-weight: 700; font-size: 12.5px;
-         text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
-  .tab.active { color: var(--accent);
-                box-shadow: inset 3px 3px 7px var(--shadow-d), inset -3px -3px 7px var(--shadow-l); }
-  #view-ask, #view-graph { display: flex; flex-direction: column; gap: 20px; }
+  .kg-link { margin-left: auto; font-size: 11.5px; font-weight: 600; letter-spacing: 0;
+             text-transform: none; color: var(--accent); text-decoration: none;
+             padding: 6px 13px; border-radius: 10px;
+             box-shadow: 4px 4px 8px var(--shadow-d), -4px -4px 8px var(--shadow-l); }
+  .kg-link:active { box-shadow: inset 3px 3px 6px var(--shadow-d), inset -3px -3px 6px var(--shadow-l); }
   .graphWell { position: relative; }
   .ev-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
               text-align: center; padding: 0 40px; color: var(--muted); font-style: italic; font-size: 13px; }
@@ -278,53 +279,34 @@
     </details>
   </aside>
 
-  <!-- ============ MAIN STAGE ============ -->
+  <!-- ============ MAIN STAGE (Ask: query + evidence graph) ============ -->
   <main>
-    <div class="tabs">
-      <button class="tab active" id="tab-ask" onclick="showTab('ask')">Ask</button>
-      <button class="tab" id="tab-graph" onclick="showTab('graph')">Knowledge Graph</button>
+    <div class="ask-wrap">
+      <div class="ask-title">Ask <span class="pill">GraphRAG</span>
+        <a class="kg-link" href="/graph-view">View full knowledge graph →</a>
+      </div>
+      <div class="ask-bar">
+        <input type="text" id="q-text" placeholder="What databases does GALO use, and what is each for?"
+               onkeydown="if(event.key==='Enter')query()">
+        <button class="primary" id="q-btn" onclick="query()">Ask</button>
+      </div>
     </div>
 
-    <!-- ---- ASK TAB ---- -->
-    <section id="view-ask">
-      <div class="ask-wrap">
-        <div class="ask-title">Ask <span class="pill">GraphRAG</span></div>
-        <div class="ask-bar">
-          <input type="text" id="q-text" placeholder="What databases does GALO use, and what is each for?"
-                 onkeydown="if(event.key==='Enter')query()">
-          <button class="primary" id="q-btn" onclick="query()">Ask</button>
-        </div>
-      </div>
+    <div class="answer-card raised">
+      <div class="answer empty" id="q-answer">Ask a question to retrieve a grounded, cited answer from the knowledge base.</div>
+      <div class="cites" id="q-cites"></div>
+    </div>
 
-      <div class="answer-card raised">
-        <div class="answer empty" id="q-answer">Ask a question to retrieve a grounded, cited answer from the knowledge base.</div>
-        <div class="cites" id="q-cites"></div>
+    <div class="graph-section">
+      <div class="graph-head">
+        <span class="ttl">Evidence graph</span>
+        <span class="meta" id="ev-meta"></span>
       </div>
-
-      <div class="graph-section">
-        <div class="graph-head">
-          <span class="ttl">Evidence graph</span>
-          <span class="meta" id="ev-meta"></span>
-        </div>
-        <div class="graphWell inset" id="graphWellEv"><canvas id="ev-graph"></canvas>
-          <div class="ev-empty" id="ev-empty">Ask a question — the entities and relationships used to answer it appear here.</div>
-        </div>
-        <div class="legend" id="ev-legend"></div>
+      <div class="graphWell inset" id="graphWellEv"><canvas id="ev-graph"></canvas>
+        <div class="ev-empty" id="ev-empty">Ask a question — the entities and relationships used to answer it appear here.</div>
       </div>
-    </section>
-
-    <!-- ---- KNOWLEDGE GRAPH TAB ---- -->
-    <section id="view-graph" hidden>
-      <div class="graph-section">
-        <div class="graph-head">
-          <span class="ttl">Full knowledge graph</span>
-          <span class="meta" id="graph-meta"></span>
-          <button class="reload" id="graph-btn" onclick="loadGraph()">↻ Reload</button>
-        </div>
-        <div class="graphWell inset"><canvas id="graph"></canvas></div>
-        <div class="legend" id="legend"></div>
-      </div>
-    </section>
+      <div class="legend" id="ev-legend"></div>
+    </div>
   </main>
 </div>
 
@@ -540,39 +522,18 @@ function GraphView(canvasId, legendId) {
   return { setData, clearErr, count, redraw: draw, relayout: () => tick(300) };
 }
 
-const fullGraph = GraphView("graph", "legend");
 const evGraph = GraphView("ev-graph", "ev-legend");
-
-async function loadGraph() {
-  const b = $("graph-btn"); b.disabled = true;
-  try {
-    const data = await api("GET","/graph?limit=60");
-    fullGraph.setData(data);
-    const c = fullGraph.count(); $("graph-meta").textContent = `${c.n} nodes · ${c.e} edges`;
-  } catch (e) { fullGraph.clearErr("graph unavailable: " + e.message); }
-  b.disabled = false;
-}
 
 async function loadEvidence(chunkIds) {
   try {
     const data = await api("POST","/graph/subgraph",{ chunk_ids: chunkIds });
-    if (!data.nodes.length) { $("ev-meta").textContent = "no graph entities for these sources"; return; }
+    if (!data.nodes.length) { $("ev-empty").textContent = "no graph entities for these sources"; return; }
     $("graphWellEv").classList.add("has-data");
     evGraph.setData(data);
     const c = evGraph.count(); const seeds = data.nodes.filter(n => n.seed).length;
     $("ev-meta").textContent = `${seeds} answer entities · ${c.n} nodes · ${c.e} edges`;
   } catch (e) { evGraph.clearErr("evidence graph unavailable: " + e.message); }
 }
-
-// ---- tabs ----
-function showTab(name) {
-  const ask = name === "ask";
-  $("view-ask").hidden = !ask; $("view-graph").hidden = ask;
-  $("tab-ask").classList.toggle("active", ask); $("tab-graph").classList.toggle("active", !ask);
-  // (re)draw whichever graph just became visible so canvas sizing is correct
-  if (ask) evGraph.redraw(); else { if (!fullGraphLoaded) { loadGraph(); fullGraphLoaded = true; } fullGraph.relayout(); }
-}
-let fullGraphLoaded = false;
 
 refresh(); setInterval(refresh, 15000);
 </script>
