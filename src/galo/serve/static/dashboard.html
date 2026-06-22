@@ -30,8 +30,11 @@
   .raised { box-shadow: 6px 6px 13px var(--shadow-d), -6px -6px 13px var(--shadow-l); }
   .inset  { box-shadow: inset 4px 4px 9px var(--shadow-d), inset -4px -4px 9px var(--shadow-l); }
 
-  /* ===== app shell: sidebar + main stage ===== */
-  .app { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; gap: 0; align-items: start; }
+  /* ===== app shell: sidebar + main stage =====
+     align-items:stretch (grid default) makes both columns fill the row's full
+     height, so the sidebar's blue background extends the whole page — even when
+     the main column is taller. The sidebar's own content stays sticky/top. */
+  .app { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; gap: 0; }
 
   /* ---- sidebar (blue, theme-aware) ----
      Re-map the neumorphic vars inside the sidebar so every nested card, input,
@@ -45,9 +48,8 @@
     padding: 20px; display: flex; flex-direction: column; gap: 16px;
     background: var(--side-bg);
     box-shadow: inset -8px 0 16px -12px var(--side-shadow-d);
-    /* stay in view while the main column scrolls the page */
-    position: sticky; top: 0; align-self: start;
-    max-height: 100vh; overflow-y: auto;
+    /* fills the full grid-row height (column stretches) so the blue background
+       never stops half-way down the page */
   }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand .logo { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: var(--accent); }
