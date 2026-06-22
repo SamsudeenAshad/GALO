@@ -31,6 +31,15 @@ async def jobs(request: Request, limit: int = 50) -> dict:
     }
 
 
+@router.get("/graph")
+async def graph(request: Request, limit: int = 300) -> dict:
+    """Entity/relationship snapshot for the dashboard visualization."""
+    try:
+        return await request.app.state.neo4j.graph_snapshot(limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"graph query failed: {exc}") from exc
+
+
 @router.get("/stats")
 async def stats(request: Request) -> dict:
     """Corpus size: chunk count (PG) and entity count (Neo4j)."""

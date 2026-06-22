@@ -178,6 +178,43 @@ class Neo4jStore:
                 (uuid.UUID(rec["id"]), rec["name"], rec["type"]) async for rec in result
             ]
 
+    async def graph_snapshot(self, limit: int = 300) -> dict:
+        """Nodes + edges for visualization: ``{nodes:[{id,name,type,degree}],
+        edges:[{source,target,type,weight}]}``. Capped at ``limit`` nodes."""
+        async with self._driver.session() as session:
+            node_res = await session.run(
+                """
+                MATCH (e:Entity)
+                OPTIONAL MATCH (e)-[r:RELATED]-()
+                RETURN e.id AS id, e.name AS name, e.type AS type,
+                       count(r) AS degree
+                ORDER BY degree DESC
+                LIMIT $limit
+                """,
+                limit=limit,
+            )
+            nodes = [
+                {"id": rec["id"], "name": rec["name"], "type": rec["type"],
+                 "degree": rec["degree"]}
+                async for rec in node_res
+            ]
+            ids = [n["id"] for n in nodes]
+            edge_res = await session.run(
+                """
+                MATCH (a:Entity)-[r:RELATED]->(b:Entity)
+                WHERE a.id IN $ids AND b.id IN $ids
+                RETURN a.id AS source, b.id AS target, r.type AS type,
+                       coalesce(r.weight, 1) AS weight
+                """,
+                ids=ids,
+            )
+            edges = [
+                {"source": rec["source"], "target": rec["target"],
+                 "type": rec["type"], "weight": rec["weight"]}
+                async for rec in edge_res
+            ]
+        return {"nodes": nodes, "edges": edges}
+
     async def merge_entities(self, keep: uuid.UUID, drop: uuid.UUID) -> None:
         """Fold entity ``drop`` into ``keep``: move its relationships and union
         its ``chunk_ids`` onto ``keep``, then delete ``drop``.

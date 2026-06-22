@@ -20,7 +20,7 @@ from galo.ingest.orchestrator import IngestionOrchestrator
 from galo.models.ollama import OllamaGateway
 from galo.retrieve.orchestrator import RetrievalOrchestrator
 from galo.serve.middleware import JsonAccessFormatter, RequestContextMiddleware
-from galo.serve.routes import health, ingest, ops, query, recommend
+from galo.serve.routes import dashboard, health, ingest, ops, query, recommend
 from galo.stores.neo4j import Neo4jStore
 from galo.stores.pg import PgStore
 
@@ -98,6 +98,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(query.router)
     app.include_router(recommend.router)
     app.include_router(ops.router)
+    app.include_router(dashboard.router)
     return app
 
 

@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GALO</title>
+<style>
+  :root {
+    --bg: #e0e5ec; --shadow-d: #a3b1c6; --shadow-l: #ffffff;
+    --text: #46505f; --muted: #8795a8; --accent: #6d8dc7;
+    --ok: #57cc99; --bad: #e07a5f; --amber: #e9c46a; --r: 16px;
+  }
+  [data-theme="dark"] {
+    --bg: #2b2f36; --shadow-d: #212429; --shadow-l: #353a42;
+    --text: #c7cdd6; --muted: #828d9e; --accent: #8aa6da;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+    background: var(--bg); color: var(--text); transition: background .3s, color .3s;
+    height: 100vh; overflow: hidden;
+  }
+  .raised { box-shadow: 6px 6px 13px var(--shadow-d), -6px -6px 13px var(--shadow-l); }
+  .inset  { box-shadow: inset 4px 4px 9px var(--shadow-d), inset -4px -4px 9px var(--shadow-l); }
+
+  /* ===== app shell: sidebar + main stage ===== */
+  .app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; gap: 0; }
+
+  /* ---- sidebar ---- */
+  aside {
+    padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+    background: var(--bg);
+    box-shadow: inset -7px 0 14px -10px var(--shadow-d);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand .logo { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: var(--accent); }
+  .brand .tag { font-size: 10.5px; color: var(--muted); line-height: 1.2; }
+  .brand .theme { margin-left: auto; width: 34px; height: 34px; border-radius: 50%; border: 0;
+    cursor: pointer; background: var(--bg); color: var(--muted); font-size: 14px;
+    box-shadow: 4px 4px 8px var(--shadow-d), -4px -4px 8px var(--shadow-l); }
+  .brand .theme:active { box-shadow: inset 3px 3px 6px var(--shadow-d), inset -3px -3px 6px var(--shadow-l); }
+
+  /* health strip */
+  .health { display: flex; flex-direction: column; gap: 7px; padding: 13px; border-radius: var(--r); }
+  .health .hrow { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); transition: .3s; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot.bad { background: var(--bad); box-shadow: 0 0 6px var(--bad); }
+  .hrow .detail { margin-left: auto; color: var(--muted); font-size: 10.5px;
+    max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* stats */
+  .stats { display: flex; gap: 12px; }
+  .stats > div { flex: 1; text-align: center; padding: 13px 6px; border-radius: var(--r); }
+  .stats .n { font-size: 24px; font-weight: 800; color: var(--accent); line-height: 1; }
+  .stats .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase;
+                letter-spacing: .6px; margin-top: 6px; }
+
+  /* collapsible secondary tools */
+  .tool { border-radius: var(--r); overflow: hidden; }
+  .tool > summary {
+    list-style: none; cursor: pointer; padding: 13px 15px; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .7px; color: var(--text);
+    display: flex; align-items: center; gap: 9px; user-select: none;
+  }
+  .tool > summary::-webkit-details-marker { display: none; }
+  .tool > summary .chev { margin-left: auto; color: var(--muted); transition: transform .2s; font-size: 11px; }
+  .tool[open] > summary .chev { transform: rotate(90deg); }
+  .tool > summary .ic { color: var(--accent); font-size: 14px; }
+  .tool .body { padding: 0 15px 15px; display: flex; flex-direction: column; gap: 10px; }
+
+  label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+          display: block; margin-bottom: 4px; }
+  input[type=text], input[type=number], textarea {
+    width: 100%; border: 0; outline: 0; font: inherit; color: var(--text);
+    background: var(--bg); border-radius: 11px; padding: 10px 13px;
+    box-shadow: inset 3px 3px 7px var(--shadow-d), inset -3px -3px 7px var(--shadow-l);
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  input::placeholder, textarea::placeholder { color: var(--muted); opacity: .7; }
+  button {
+    border: 0; cursor: pointer; font: inherit; font-weight: 600; color: var(--text);
+    background: var(--bg); border-radius: 11px; padding: 10px 16px;
+    box-shadow: 4px 4px 9px var(--shadow-d), -4px -4px 9px var(--shadow-l);
+    transition: box-shadow .14s, color .14s;
+  }
+  button:hover { color: var(--accent); }
+  button:active, button:disabled { box-shadow: inset 3px 3px 7px var(--shadow-d), inset -3px -3px 7px var(--shadow-l); }
+  button:disabled { color: var(--muted); cursor: wait; }
+  button.primary { color: var(--accent); }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .out { padding: 11px 13px; font-size: 12.5px; border-radius: 11px; white-space: pre-wrap;
+         word-break: break-word; min-height: 18px; }
+  .out.empty { color: var(--muted); font-style: italic; }
+  .out.err { color: var(--bad); }
+  .hint { font-size: 10.5px; color: var(--muted); }
+  .reclist .rec { display: flex; justify-content: space-between; gap: 8px; align-items: center;
+                  padding: 7px 11px; margin-top: 7px; border-radius: 10px; font-size: 12px; }
+  .reclist .sc { color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .chip { display: inline-block; padding: 5px 12px; margin: 3px; border-radius: 14px;
+          font-size: 12.5px; font-weight: 600; }
+  .arrow { color: var(--muted); margin: 0 2px; font-weight: 700; }
+  .jobline { display: flex; gap: 7px; align-items: center; font-size: 11.5px; padding: 5px 0; }
+  .jdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .jdot.done { background: var(--ok); } .jdot.failed { background: var(--bad); }
+  .jdot.running, .jdot.pending { background: var(--amber); }
+
+  /* ===== main stage: query hero ===== */
+  main { padding: 26px 30px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+  .ask-wrap { display: flex; flex-direction: column; gap: 12px; }
+  .ask-title { font-size: 13px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted);
+               display: flex; align-items: center; gap: 9px; }
+  .ask-bar { display: flex; gap: 12px; }
+  .ask-bar input {
+    flex: 1; border: 0; outline: 0; font: 16px inherit; color: var(--text); background: var(--bg);
+    border-radius: 14px; padding: 16px 20px;
+    box-shadow: inset 4px 4px 10px var(--shadow-d), inset -4px -4px 10px var(--shadow-l);
+  }
+  .ask-bar button { padding: 0 28px; border-radius: 14px; font-size: 15px; color: var(--accent); }
+
+  .answer-card { border-radius: 20px; padding: 26px 30px; min-height: 120px;
+                 display: flex; flex-direction: column; gap: 14px; }
+  .answer { font-size: 16px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
+  .answer.empty { color: var(--muted); font-style: italic; font-size: 14px; }
+  .answer.err { color: var(--bad); }
+  .cites { display: flex; flex-direction: column; gap: 8px; }
+  .cites .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .cite { padding: 10px 14px; border-radius: 11px; font-size: 12.5px; line-height: 1.5; }
+  .cite b { color: var(--accent); }
+  .gp { color: var(--accent); font-weight: 600; }
+
+  /* graph as supporting evidence */
+  .graph-head { display: flex; align-items: center; gap: 12px; }
+  .graph-head .ttl { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); }
+  .graph-head .meta { font-size: 11px; color: var(--muted); }
+  .graph-head .reload { margin-left: auto; padding: 7px 14px; font-size: 12px; }
+  .graphWell { padding: 10px; border-radius: 18px; }
+  canvas { width: 100%; height: 380px; border-radius: 12px; display: block; cursor: grab; }
+  .legend { display: flex; gap: 15px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted); margin-top: 8px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+
+  .pill { font-size: 9.5px; padding: 2px 8px; border-radius: 9px; color: var(--accent); font-weight: 700;
+          box-shadow: inset 2px 2px 4px var(--shadow-d), inset -2px -2px 4px var(--shadow-l); }
+  .spin { display: inline-block; width: 13px; height: 13px; border-radius: 50%;
+          border: 2px solid var(--muted); border-top-color: var(--accent);
+          animation: sp .7s linear infinite; vertical-align: -2px; margin-right: 7px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+
+  @media (max-width: 860px) {
+    body { overflow: auto; height: auto; }
+    .app { grid-template-columns: 1fr; height: auto; }
+    aside { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ============ SIDEBAR (status + secondary tools) ============ -->
+  <aside>
+    <div class="brand">
+      <span class="logo">GALO</span>
+      <span class="tag">Graph Aware<br>Learning Orchestration</span>
+      <button class="theme" id="themeBtn" title="Toggle theme">🌙</button>
+    </div>
+
+    <div class="health raised">
+      <div class="hrow"><span class="dot" id="dot-ollama"></span>Ollama
+        <span class="detail" id="det-ollama"></span></div>
+      <div class="hrow"><span class="dot" id="dot-postgres"></span>Postgres
+        <span class="detail" id="det-postgres"></span></div>
+      <div class="hrow"><span class="dot" id="dot-neo4j"></span>Neo4j
+        <span class="detail" id="det-neo4j"></span></div>
+    </div>
+
+    <div class="stats">
+      <div class="raised"><div class="n" id="stat-chunks">–</div><div class="lbl">chunks</div></div>
+      <div class="raised"><div class="n" id="stat-entities">–</div><div class="lbl">entities</div></div>
+    </div>
+
+    <details class="tool raised">
+      <summary><span class="ic">＋</span>Ingest document<span class="chev">▶</span></summary>
+      <div class="body">
+        <div><label>Title</label><input type="text" id="ing-title" placeholder="Optional"></div>
+        <div><label>Text</label><textarea id="ing-text" placeholder="Paste document text…"></textarea></div>
+        <button class="primary" id="ing-btn" onclick="ingest()">Ingest</button>
+        <span class="hint">chunk → embed → extract entities</span>
+        <div class="out inset empty" id="ing-out">no result yet</div>
+      </div>
+    </details>
+
+    <details class="tool raised">
+      <summary><span class="ic">◈</span>Recommend<span class="chev">▶</span></summary>
+      <div class="body">
+        <div><label>Seed entity</label><input type="text" id="rec-entity" placeholder="GALO"></div>
+        <div class="row">
+          <div><label>k</label><input type="number" id="rec-k" value="5" min="1" max="50"></div>
+          <div><label>α semantic↔graph</label><input type="number" id="rec-alpha" value="0.5" min="0" max="1" step="0.1"></div>
+        </div>
+        <button onclick="recommend()">Recommend</button>
+        <div class="out inset empty reclist" id="rec-out">no result yet</div>
+      </div>
+    </details>
+
+    <details class="tool raised">
+      <summary><span class="ic">⇢</span>Learning path<span class="chev">▶</span></summary>
+      <div class="body">
+        <div><label>From</label><input type="text" id="path-from" placeholder="pgvector"></div>
+        <div><label>To</label><input type="text" id="path-to" placeholder="GALO"></div>
+        <button onclick="findPath()">Find path</button>
+        <div class="out inset empty" id="path-out">no result yet</div>
+      </div>
+    </details>
+
+    <details class="tool raised">
+      <summary><span class="ic">≡</span>Recent jobs<span class="chev">▶</span></summary>
+      <div class="body"><div class="out inset empty" id="jobs">none yet</div></div>
+    </details>
+  </aside>
+
+  <!-- ============ MAIN STAGE (query hero + graph evidence) ============ -->
+  <main>
+    <div class="ask-wrap">
+      <div class="ask-title">Ask <span class="pill">GraphRAG</span></div>
+      <div class="ask-bar">
+        <input type="text" id="q-text" placeholder="What databases does GALO use, and what is each for?"
+               onkeydown="if(event.key==='Enter')query()">
+        <button class="primary" id="q-btn" onclick="query()">Ask</button>
+      </div>
+    </div>
+
+    <div class="answer-card raised">
+      <div class="answer empty" id="q-answer">Ask a question to retrieve a grounded, cited answer from the knowledge base.</div>
+      <div class="cites" id="q-cites"></div>
+    </div>
+
+    <div>
+      <div class="graph-head">
+        <span class="ttl">Knowledge graph</span>
+        <span class="meta" id="graph-meta"></span>
+        <button class="reload" id="graph-btn" onclick="loadGraph()">↻ Reload</button>
+      </div>
+      <div class="graphWell inset" style="margin-top:10px"><canvas id="graph"></canvas></div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+async function api(method, path, body) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) { opts.headers["content-type"] = "application/json"; opts.body = JSON.stringify(body); }
+  const r = await fetch(path, opts);
+  const t = await r.text(); let d; try { d = JSON.parse(t); } catch { d = t; }
+  if (!r.ok) throw new Error((d && d.detail) ? d.detail : ("HTTP " + r.status));
+  return d;
+}
+function setOut(el, c, err) { el.classList.remove("empty"); el.classList.toggle("err", !!err); el.textContent = c; }
+function loading(el, m) { el.classList.remove("empty","err"); el.innerHTML = '<span class="spin"></span>' + m; }
+
+$("themeBtn").onclick = () => {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+  $("themeBtn").textContent = dark ? "🌙" : "☀️"; draw();
+};
+
+async function refresh() {
+  try {
+    const h = await api("GET","/health");
+    for (const k of ["ollama","postgres","neo4j"]) {
+      const s = h.dependencies[k], dot = $("dot-"+k);
+      dot.classList.toggle("ok", !!(s && s.ok)); dot.classList.toggle("bad", !!(s && !s.ok));
+      $("det-"+k).textContent = s ? s.detail : "";
+    }
+  } catch {}
+  try { const s = await api("GET","/stats");
+    $("stat-chunks").textContent = s.chunks ?? "–"; $("stat-entities").textContent = s.entities ?? "–"; } catch {}
+  try {
+    const j = await api("GET","/jobs?limit=8");
+    if (j.jobs.length) { $("jobs").classList.remove("empty");
+      $("jobs").innerHTML = j.jobs.map(x =>
+        `<div class="jobline"><span class="jdot ${x.status}"></span><b>${x.step}</b> · ${x.status}${x.error?" — "+x.error:""}</div>`).join(""); }
+  } catch {}
+}
+
+async function ingest() {
+  const b = $("ing-btn"); b.disabled = true;
+  loading($("ing-out"), "ingesting…");
+  try {
+    const r = await api("POST","/ingest",{ text: $("ing-text").value, title: $("ing-title").value || null });
+    setOut($("ing-out"), `✓ ${r.document_id.slice(0,8)} · ${r.chunks} chunk(s)${r.skipped?" · skipped (exists)":""}`);
+    refresh(); loadGraph();
+  } catch (e) { setOut($("ing-out"), "Error: " + e.message, true); }
+  b.disabled = false;
+}
+async function query() {
+  const b = $("q-btn"); b.disabled = true;
+  loading($("q-answer"), "retrieving + generating…"); $("q-cites").innerHTML = "";
+  try {
+    const r = await api("POST","/query",{ question: $("q-text").value });
+    setOut($("q-answer"), r.answer);
+    if (r.citations.length) {
+      $("q-cites").innerHTML = '<div class="lbl">Sources</div>' + r.citations.map((c,i) =>
+        `<div class="cite inset"><b>[${i+1}]</b> chunk ${c.chunk_id.slice(0,8)} · score ${c.score.toFixed(4)}` +
+        (c.graph_path && c.graph_path.length ? ` · <span class="gp">${c.graph_path.join(" → ")}</span>` : "") + `</div>`).join("");
+    }
+  } catch (e) { setOut($("q-answer"), "Error: " + e.message, true); }
+  b.disabled = false;
+}
+async function recommend() {
+  loading($("rec-out"), "…");
+  try {
+    const r = await api("POST","/recommend",{ entity: $("rec-entity").value, k:+$("rec-k").value, alpha:+$("rec-alpha").value });
+    if (!r.seed_found) { setOut($("rec-out"), "entity not found in graph"); return; }
+    if (!r.recommendations.length) { setOut($("rec-out"), "no recommendations"); return; }
+    $("rec-out").classList.remove("empty","err");
+    $("rec-out").innerHTML = r.recommendations.map(x =>
+      `<div class="rec inset"><b>${x.name}</b><span class="sc">${x.score.toFixed(3)} · sim ${x.similarity.toFixed(2)}</span></div>`).join("");
+  } catch (e) { setOut($("rec-out"), "Error: " + e.message, true); }
+}
+async function findPath() {
+  loading($("path-out"), "…");
+  try {
+    const r = await api("POST","/path",{ from_concept: $("path-from").value, to_concept: $("path-to").value });
+    if (!r.found) { setOut($("path-out"), r.reason || "no path"); return; }
+    $("path-out").classList.remove("empty","err");
+    $("path-out").innerHTML = r.steps.map(s => `<span class="chip raised">${s.name}</span>`).join('<span class="arrow">→</span>');
+  } catch (e) { setOut($("path-out"), "Error: " + e.message, true); }
+}
+
+// ---- force-directed graph ----
+const TYPE_COLORS = { PERSON:"#f778ba", ORG:"#6d8dc7", CONCEPT:"#57cc99", PLACE:"#e9c46a", OTHER:"#9aa5b1" };
+const cv = $("graph"), ctx = cv.getContext("2d");
+let G = { nodes: [], edges: [] }, drag = null, raf = null;
+function resizeCanvas() { const p = window.devicePixelRatio||1; cv.width = cv.clientWidth*p; cv.height = 380*p; ctx.setTransform(p,0,0,p,0,0); }
+async function loadGraph() {
+  const b = $("graph-btn"); b.disabled = true;
+  try {
+    const data = await api("GET","/graph?limit=200"); const W = cv.clientWidth, H = 380;
+    G.nodes = data.nodes.map((n,i) => ({ ...n, x: W/2+Math.cos(i*1.7)*120, y: H/2+Math.sin(i*1.7)*95, vx:0, vy:0 }));
+    const by = Object.fromEntries(G.nodes.map(n => [n.id, n]));
+    G.edges = data.edges.map(e => ({ ...e, s: by[e.source], t: by[e.target] })).filter(e => e.s && e.t);
+    $("graph-meta").textContent = `${G.nodes.length} nodes · ${G.edges.length} edges`;
+    const types = [...new Set(G.nodes.map(n => n.type))];
+    $("legend").innerHTML = types.map(t => `<span><i style="background:${TYPE_COLORS[t]||TYPE_COLORS.OTHER}"></i>${t}</span>`).join("");
+    if (raf) cancelAnimationFrame(raf); tick(220);
+  } catch (e) { ctx.clearRect(0,0,cv.width,cv.height); ctx.fillStyle = "#e07a5f"; ctx.font = "13px system-ui"; ctx.fillText("graph unavailable: "+e.message, 14, 26); }
+  b.disabled = false;
+}
+function simStep() {
+  const W = cv.clientWidth, H = 380, ns = G.nodes;
+  for (let i=0;i<ns.length;i++) for (let j=i+1;j<ns.length;j++){ const a=ns[i],b=ns[j]; let dx=a.x-b.x,dy=a.y-b.y; let d2=dx*dx+dy*dy||0.01; const f=1700/d2,d=Math.sqrt(d2),ux=dx/d,uy=dy/d; a.vx+=ux*f;a.vy+=uy*f;b.vx-=ux*f;b.vy-=uy*f; }
+  for (const e of G.edges){ let dx=e.t.x-e.s.x,dy=e.t.y-e.s.y; const d=Math.sqrt(dx*dx+dy*dy)||0.01; const f=(d-90)*0.01,ux=dx/d,uy=dy/d; e.s.vx+=ux*f;e.s.vy+=uy*f;e.t.vx-=ux*f;e.t.vy-=uy*f; }
+  for (const n of ns){ if (n===drag){ n.vx=n.vy=0; continue; } n.vx+=(W/2-n.x)*0.0009; n.vy+=(H/2-n.y)*0.0009; n.vx*=0.86;n.vy*=0.86;n.x+=n.vx;n.y+=n.vy; n.x=Math.max(20,Math.min(W-20,n.x)); n.y=Math.max(20,Math.min(H-20,n.y)); }
+}
+function draw() {
+  const css = getComputedStyle(document.documentElement);
+  const edge = css.getPropertyValue("--shadow-d").trim(), txt = css.getPropertyValue("--text").trim();
+  ctx.clearRect(0,0,cv.clientWidth,380); ctx.strokeStyle = edge; ctx.lineWidth = 1.2;
+  for (const e of G.edges){ ctx.beginPath(); ctx.moveTo(e.s.x,e.s.y); ctx.lineTo(e.t.x,e.t.y); ctx.stroke(); }
+  for (const n of G.nodes){ const r = 6+Math.min(n.degree,9); ctx.beginPath(); ctx.arc(n.x,n.y,r,0,Math.PI*2); ctx.fillStyle = TYPE_COLORS[n.type]||TYPE_COLORS.OTHER; ctx.fill(); ctx.fillStyle = txt; ctx.font = "11px system-ui"; ctx.fillText(n.name, n.x+r+4, n.y+4); }
+}
+function tick(f){ simStep(); draw(); if (f>0 || drag) raf = requestAnimationFrame(()=>tick(f-1)); }
+function nodeAt(mx,my){ for (const n of G.nodes){ const r=6+Math.min(n.degree,9)+5; if ((n.x-mx)**2+(n.y-my)**2<=r*r) return n; } return null; }
+cv.addEventListener("mousedown", ev => { const b=cv.getBoundingClientRect(); drag=nodeAt(ev.clientX-b.left,ev.clientY-b.top); if (drag){ cv.style.cursor="grabbing"; if(!raf) tick(0); } });
+window.addEventListener("mousemove", ev => { if (!drag) return; const b=cv.getBoundingClientRect(); drag.x=ev.clientX-b.left; drag.y=ev.clientY-b.top; });
+window.addEventListener("mouseup", () => { if (drag){ drag=null; cv.style.cursor="grab"; tick(80); } });
+window.addEventListener("resize", () => { resizeCanvas(); draw(); });
+
+resizeCanvas(); refresh(); loadGraph(); setInterval(refresh, 15000);
+</script>
+</body>
+</html>
