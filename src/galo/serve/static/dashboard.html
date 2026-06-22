@@ -25,13 +25,13 @@
   body {
     font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
     background: var(--bg); color: var(--text); transition: background .3s, color .3s;
-    height: 100vh; overflow: hidden;
+    min-height: 100vh;
   }
   .raised { box-shadow: 6px 6px 13px var(--shadow-d), -6px -6px 13px var(--shadow-l); }
   .inset  { box-shadow: inset 4px 4px 9px var(--shadow-d), inset -4px -4px 9px var(--shadow-l); }
 
   /* ===== app shell: sidebar + main stage ===== */
-  .app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; gap: 0; }
+  .app { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; gap: 0; align-items: start; }
 
   /* ---- sidebar (blue, theme-aware) ----
      Re-map the neumorphic vars inside the sidebar so every nested card, input,
@@ -42,9 +42,12 @@
     --shadow-l: var(--side-shadow-l);
     --text: var(--side-text);
     --muted: var(--side-muted);
-    padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+    padding: 20px; display: flex; flex-direction: column; gap: 16px;
     background: var(--side-bg);
     box-shadow: inset -8px 0 16px -12px var(--side-shadow-d);
+    /* stay in view while the main column scrolls the page */
+    position: sticky; top: 0; align-self: start;
+    max-height: 100vh; overflow-y: auto;
   }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand .logo { font-size: 22px; font-weight: 800; letter-spacing: 1px; color: var(--accent); }
@@ -130,7 +133,7 @@
   .jdot.running, .jdot.pending { background: var(--amber); }
 
   /* ===== main stage: query hero ===== */
-  main { padding: 26px 30px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+  main { padding: 26px 30px; display: flex; flex-direction: column; gap: 20px; }
   .ask-wrap { display: flex; flex-direction: column; gap: 12px; }
   .ask-title { font-size: 13px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted);
                display: flex; align-items: center; gap: 9px; }
@@ -144,8 +147,7 @@
 
   .answer-card { border-radius: 20px; padding: 24px 28px; min-height: 110px;
                  display: flex; flex-direction: column; gap: 14px; }
-  .answer { font-size: 15px; line-height: 1.65; color: var(--text);
-            max-height: 360px; overflow-y: auto; padding-right: 6px; }
+  .answer { font-size: 15px; line-height: 1.65; color: var(--text); }
   .answer.empty { color: var(--muted); font-style: italic; font-size: 14px; }
   .answer.err { color: var(--bad); white-space: pre-wrap; }
   /* rendered markdown inside the answer */
