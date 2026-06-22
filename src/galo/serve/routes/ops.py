@@ -40,6 +40,24 @@ async def graph(request: Request, limit: int = 300) -> dict:
         raise HTTPException(status_code=502, detail=f"graph query failed: {exc}") from exc
 
 
+@router.post("/graph/subgraph")
+async def subgraph(request: Request) -> dict:
+    """Evidence subgraph for an answer: pass {"chunk_ids": [...]} (the cited
+    chunks) → entities in those chunks + their neighbors + edges."""
+    import uuid
+
+    body = await request.json()
+    raw = body.get("chunk_ids", []) if isinstance(body, dict) else []
+    try:
+        chunk_ids = [uuid.UUID(str(c)) for c in raw]
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"bad chunk_ids: {exc}") from exc
+    try:
+        return await request.app.state.neo4j.subgraph_for_chunks(chunk_ids)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"subgraph query failed: {exc}") from exc
+
+
 @router.get("/stats")
 async def stats(request: Request) -> dict:
     """Corpus size: chunk count (PG) and entity count (Neo4j)."""

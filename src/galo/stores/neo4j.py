@@ -215,6 +215,55 @@ class Neo4jStore:
             ]
         return {"nodes": nodes, "edges": edges}
 
+    async def subgraph_for_chunks(self, chunk_ids: list[uuid.UUID]) -> dict:
+        """Evidence subgraph behind an answer: entities mentioned in the given
+        chunks ("seed" entities), plus their direct :RELATED neighbors, plus the
+        edges among all of them. Same node/edge shape as ``graph_snapshot``;
+        seed entities are flagged ``seed: true``.
+        """
+        if not chunk_ids:
+            return {"nodes": [], "edges": []}
+        cids = [str(c) for c in chunk_ids]
+        async with self._driver.session() as session:
+            node_res = await session.run(
+                """
+                // seed entities mentioned in the cited chunks
+                MATCH (s:Entity)
+                WHERE any(c IN $cids WHERE c IN coalesce(s.chunk_ids, []))
+                // include their direct neighbors too
+                OPTIONAL MATCH (s)-[:RELATED]-(n:Entity)
+                WITH collect(DISTINCT s) AS seeds, collect(DISTINCT n) AS nbrs
+                WITH seeds, [x IN nbrs WHERE x IS NOT NULL] AS nbrs
+                UNWIND (seeds + nbrs) AS e
+                WITH DISTINCT e, e IN seeds AS isSeed
+                OPTIONAL MATCH (e)-[r:RELATED]-()
+                RETURN e.id AS id, e.name AS name, e.type AS type,
+                       count(r) AS degree, isSeed AS seed
+                """,
+                cids=cids,
+            )
+            nodes = [
+                {"id": rec["id"], "name": rec["name"], "type": rec["type"],
+                 "degree": rec["degree"], "seed": rec["seed"]}
+                async for rec in node_res
+            ]
+            ids = [n["id"] for n in nodes]
+            edge_res = await session.run(
+                """
+                MATCH (a:Entity)-[r:RELATED]->(b:Entity)
+                WHERE a.id IN $ids AND b.id IN $ids
+                RETURN a.id AS source, b.id AS target, r.type AS type,
+                       coalesce(r.weight, 1) AS weight
+                """,
+                ids=ids,
+            )
+            edges = [
+                {"source": rec["source"], "target": rec["target"],
+                 "type": rec["type"], "weight": rec["weight"]}
+                async for rec in edge_res
+            ]
+        return {"nodes": nodes, "edges": edges}
+
     async def merge_entities(self, keep: uuid.UUID, drop: uuid.UUID) -> None:
         """Fold entity ``drop`` into ``keep``: move its relationships and union
         its ``chunk_ids`` onto ``keep``, then delete ``drop``.
